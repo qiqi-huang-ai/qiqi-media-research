@@ -128,3 +128,18 @@ def test_execute_competitor_discovery_writes_account_evidence(tmp_path):
     )
     assert result.report_path.is_file()
     assert "account:sec-1" in result.report_path.read_text()
+
+
+@pytest.mark.parametrize("mode,marker", [
+    ("content-gap", "供给与需求"),
+    ("brand-product", "品牌/产品"),
+    ("idea-generation", "证据化选题"),
+    ("market-map", "市场结构"),
+])
+def test_specialized_keyword_modes_have_mode_specific_analysis(tmp_path, mode, marker):
+    result = execute_request(
+        ResearchRequest(mode=mode, platform="douyin", query="AI工具"),
+        adapter=FakeAdapter(),
+        output_root=tmp_path / mode,
+    )
+    assert marker in result.report_path.read_text()

@@ -136,6 +136,8 @@ def execute_request(request: ResearchRequest, *, adapter: Any, output_root: str 
         return _execute_trend_mode(request, plan, adapter, output_root)
     if request.mode == "competitor-discovery":
         return _execute_competitor_mode(request, plan, adapter, output_root)
+    if request.mode in {"content-gap", "brand-product", "idea-generation", "market-map"}:
+        return _execute_specialized_keyword_mode(request, plan, adapter, output_root)
     if "search" not in plan.operations:
         raise ValueError(f"mode {request.mode} requires an explicit entity and is not keyword-executable")
 
@@ -301,6 +303,39 @@ def _execute_competitor_mode(request: ResearchRequest, plan: ResearchPlan, adapt
         confidence="low",
     )
     report_path = root / "reports" / "competitor-discovery.md"
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+    report_path.write_text(render_report(report), encoding="utf-8")
+    return ResearchExecution(plan, (raw_path,), normalized, report_path)
+
+
+def _execute_specialized_keyword_mode(request: ResearchRequest, plan: ResearchPlan, adapter: Any, output_root: str | Path) -> ResearchExecution:
+    root = Path(output_root)
+    store = RawStore(root)
+    page = adapter.search_posts(request.query, cursor="0")
+    raw_path = store.save(request.platform, "search", page.raw)
+    posts = list(page.items)
+    for post in posts:
+        post.raw_path = str(raw_path)
+    normalized = write_normalized(root, "posts", posts)
+    metrics = compute_post_metrics(posts)
+    evidence = [f"post:{post.post_id}" for post in posts[:5]] or [f"raw:{raw_path.name}"]
+    labels = {
+        "content-gap": ("内容空白", "供给与需求"),
+        "brand-product": ("品牌/产品", "公开提及与疑问"),
+        "idea-generation": ("证据化选题", "可追溯选题"),
+        "market-map": ("市场结构", "账号与主题结构"),
+    }
+    section, analysis = labels[request.mode]
+    report = ResearchReport(
+        title=f"{request.platform} {request.mode}",
+        summary=f"完成“{request.query}”的{section}分析。",
+        task=f"研究模式：{request.mode}；关键词：{request.query}",
+        coverage=f"{len(posts)} 条搜索作品，{sum(metric.engagement_rate is not None for metric in metrics)} 条可计算互动率。",
+        findings=[Finding(text=f"本次以 {analysis} 为分析框架，样本需继续扩展后再形成高置信结论。", evidence_ids=evidence, evidence_class="interpreted")],
+        limitations=["当前为一页搜索样本；没有把样本外信息写成结论。"],
+        confidence="low",
+    )
+    report_path = root / "reports" / f"{request.mode}-{request.platform}.md"
     report_path.parent.mkdir(parents=True, exist_ok=True)
     report_path.write_text(render_report(report), encoding="utf-8")
     return ResearchExecution(plan, (raw_path,), normalized, report_path)
