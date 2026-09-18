@@ -1,0 +1,18 @@
+{
+  "code": 200,
+  "data": {
+    "comments": [
+      {
+        "cid": "comment-1",
+        "aweme_id": "post-1",
+        "text": "synthetic question",
+        "create_time": 1711200100,
+        "digg_count": 23,
+        "reply_comment_total": 2,
+        "user": {"sec_uid": "viewer-1", "nickname": "Viewer"}
+      }
+    ],
+    "cursor": 20,
+    "has_more": true
+  }
+}

@@ -1,0 +1,23 @@
+{
+  "code": 200,
+  "data": {
+    "aweme_list": [
+      {
+        "aweme_id": "post-1",
+        "desc": "first synthetic post",
+        "share_url": "https://example.test/douyin/video/post-1",
+        "author": {"sec_uid": "sec-1", "nickname": "Creator A"},
+        "statistics": {"play_count": 1000, "digg_count": 100}
+      },
+      {
+        "aweme_id": "post-2",
+        "desc": "missing play count",
+        "share_url": "https://example.test/douyin/video/post-2",
+        "author": {"sec_uid": "sec-1", "nickname": "Creator A"},
+        "statistics": {"digg_count": 80}
+      }
+    ],
+    "max_cursor": 20,
+    "has_more": 1
+  }
+}

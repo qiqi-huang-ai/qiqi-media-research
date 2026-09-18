@@ -1,0 +1,24 @@
+{
+  "code": 200,
+  "data": {
+    "aweme_detail": {
+      "aweme_id": "7350810998023949599",
+      "desc": "synthetic test video",
+      "create_time": 1711200000,
+      "share_url": "https://example.test/douyin/video/7350810998023949599",
+      "duration": 18500,
+      "author": {
+        "sec_uid": "sec-test-1",
+        "nickname": "Test Creator",
+        "follower_count": 500000
+      },
+      "statistics": {
+        "play_count": 3120000,
+        "digg_count": 214000,
+        "comment_count": 9300,
+        "share_count": 14200,
+        "collect_count": 22100
+      }
+    }
+  }
+}
