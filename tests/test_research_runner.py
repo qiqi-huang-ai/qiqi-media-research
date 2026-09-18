@@ -1,6 +1,6 @@
 import pytest
 
-from scripts.research_runner import MODES, ResearchRequest, plan_request
+from scripts.research_runner import MODES, ResearchRequest, execute_request, plan_request
 
 
 def test_all_eleven_modes_have_a_bounded_plan():
@@ -26,3 +26,22 @@ def test_plan_does_not_claim_exact_price():
     plan = plan_request(ResearchRequest(mode="trend-scan", platform="douyin", query="AI工具"))
     assert "price" not in plan.cost_notice.lower()
     assert "调用" in plan.cost_notice
+
+
+class FakeAdapter:
+    def search_posts(self, keyword, **kwargs):
+        from adapters.base import Page
+        from scripts.models import Post
+        return Page([Post(platform="douyin", post_id="p1", source_url="https://example/p1", author_id="a", views=100, likes=10)], None, False, {"items": ["fixture"]})
+
+
+def test_execute_keyword_mode_writes_evidence_and_report(tmp_path):
+    result = execute_request(
+        ResearchRequest(mode="niche-discovery", platform="douyin", query="AI工具"),
+        adapter=FakeAdapter(),
+        output_root=tmp_path,
+    )
+    assert result.report_path.is_file()
+    assert result.raw_paths
+    assert result.normalized_path.is_file()
+    assert "evidence:" in result.report_path.read_text()

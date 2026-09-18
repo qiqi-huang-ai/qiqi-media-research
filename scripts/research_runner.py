@@ -5,8 +5,14 @@ endpoint details; semantic interpretation remains evidence-bound report work.
 """
 
 from dataclasses import dataclass
+from pathlib import Path
+from typing import Any
 
+from scripts.analyze import compute_post_metrics
 from scripts.collect import CollectionPlan, cost_notice, estimate_requests
+from scripts.normalize import write_normalized
+from scripts.raw_store import RawStore
+from scripts.report import Finding, ResearchReport, render_report
 
 
 MODES = (
@@ -42,6 +48,14 @@ class ResearchPlan:
     operations: tuple[str, ...]
     request_count: int
     cost_notice: str
+
+
+@dataclass(frozen=True, slots=True)
+class ResearchExecution:
+    plan: ResearchPlan
+    raw_paths: tuple[Path, ...]
+    normalized_path: Path
+    report_path: Path
 
 
 _MODE_OPERATIONS: dict[str, tuple[str, ...]] = {
@@ -95,3 +109,44 @@ def plan_request(request: ResearchRequest) -> ResearchPlan:
         )
     count = estimate_requests(plan)
     return ResearchPlan(request.mode, request.platform, operations, count, cost_notice(request.platform, plan))
+
+
+def execute_request(request: ResearchRequest, *, adapter: Any, output_root: str | Path) -> ResearchExecution:
+    """Execute the bounded keyword-search slice of a research request.
+
+    Modes needing an account or post identifier are intentionally not guessed;
+    callers must supply a specialized adapter invocation in a later execution
+    layer. This first slice is enough for low-cost niche/trend/gap research.
+    """
+    plan = plan_request(request)
+    if "search" not in plan.operations:
+        raise ValueError(f"mode {request.mode} requires an explicit entity and is not keyword-executable")
+    if request.mode == "cross-platform":
+        raise ValueError("cross-platform execution requires two adapters; use plan_request first")
+
+    root = Path(output_root)
+    store = RawStore(root)
+    page = adapter.search_posts(request.query, cursor="0")
+    raw_path = store.save(request.platform, "search", page.raw)
+    posts = list(page.items)
+    for post in posts:
+        post.raw_path = str(raw_path)
+    normalized = write_normalized(root, "posts", posts)
+    metrics = compute_post_metrics(posts)
+    report = ResearchReport(
+        title=f"{request.platform} {request.mode}",
+        summary=f"关键词“{request.query}”完成一页低成本样本研究。",
+        task=f"研究模式：{request.mode}；查询：{request.query}",
+        coverage=f"{len(posts)} 条作品，1 页搜索，原始证据已保存。",
+        findings=[Finding(
+            text=f"样本中 {sum(metric.relative_performance is not None for metric in metrics)} 条作品可计算账号内相对表现。",
+            evidence_ids=[f"post:{post.post_id}" for post in posts[:3]],
+            evidence_class="calculated",
+        )] if posts else [],
+        limitations=["仅执行关键词搜索切片，未自动扩展账号、评论或详情调用。"],
+        confidence="low" if len(posts) < 10 else "medium",
+    )
+    report_path = root / "reports" / f"{request.mode}-{request.platform}.md"
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+    report_path.write_text(render_report(report), encoding="utf-8")
+    return ResearchExecution(plan, (raw_path,), normalized, report_path)
