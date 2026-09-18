@@ -47,3 +47,10 @@ def test_upstream_service_error_is_not_an_empty_result():
     payload = {"code": 200, "data": {"success": False, "msg": "服务异常"}}
     with pytest.raises(XiaohongshuAvailabilityError):
         XiaohongshuAdapter(FakeClient(payload)).get_post(note_id="bad-id")
+
+
+def test_detail_maps_live_nested_note_list_shape():
+    note = load("note.json")["data"]["note"]
+    payload = {"data": {"success": True, "data": [{"note_list": [note]}]}}
+    post = XiaohongshuAdapter(FakeClient(payload)).get_post(note_id="note-1")
+    assert post.post_id == "note-1"

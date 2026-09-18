@@ -74,6 +74,26 @@ class TikHubClient:
             method="GET",
         )
 
+        return self._open(request)
+
+    def post(self, path: str, payload: Mapping[str, object]) -> ApiResponse:
+        url = f"{self.base_url}/{path.lstrip('/')}"
+        body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+        request = urllib.request.Request(
+            url,
+            data=body,
+            headers={
+                "Authorization": f"Bearer {self._api_key}",
+                "Accept": "application/json",
+                "Content-Type": "application/json",
+                "User-Agent": "qiqi-media-research/0.1.0",
+            },
+            method="POST",
+        )
+        return self._open(request)
+
+    def _open(self, request: urllib.request.Request) -> ApiResponse:
+
         for attempt in range(self.max_retries + 1):
             try:
                 with urllib.request.urlopen(request, timeout=self.timeout) as response:

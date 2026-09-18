@@ -18,6 +18,9 @@ class FakeClient:
         self.calls.append((path, params))
         return type("Response", (), {"data": self.payload})()
 
+    def post(self, path, params):
+        return self.get(path, params)
+
 
 def load(name):
     return json.loads((FIXTURES / name).read_text())
@@ -61,3 +64,10 @@ def test_filtered_response_is_not_treated_as_empty_result():
     payload = {"code": 200, "data": {"filter_detail": {"detail": "private"}}}
     with pytest.raises(DouyinAvailabilityError):
         DouyinAdapter(FakeClient(payload)).get_post(aweme_id="private-1")
+
+
+def test_search_maps_live_business_data_shape():
+    aweme = load("video.json")["data"]["aweme_detail"]
+    payload = {"data": {"business_data": [{"data": {"aweme_info": aweme}}]}}
+    page = DouyinAdapter(FakeClient(payload)).search_posts("AI")
+    assert page.items[0].post_id == "7350810998023949599"

@@ -56,11 +56,17 @@ def _items(body: dict[str, Any], *keys: str) -> list[dict[str, Any]]:
         value = body.get(key)
         if isinstance(value, list):
             return [x for x in value if isinstance(x, dict)]
-    return []
+    nested = body.get("data")
+    return _items(nested, *keys) if isinstance(nested, dict) else []
 
 
 def _post(item: dict[str, Any]) -> Post:
-    card = item.get("note_card") if isinstance(item.get("note_card"), dict) else item
+    if isinstance(item.get("note_card"), dict):
+        card = item["note_card"]
+    elif isinstance(item.get("note"), dict):
+        card = item["note"]
+    else:
+        card = item
     note_id = str(card.get("note_id") or item.get("id") or card.get("id") or "")
     user = card.get("user") if isinstance(card.get("user"), dict) else {}
     stats = card.get("interact_info") if isinstance(card.get("interact_info"), dict) else {}
@@ -74,24 +80,33 @@ def _post(item: dict[str, Any]) -> Post:
         author_id=_str(user.get("user_id") or user.get("userid")),
         author_name=_str(user.get("nickname") or user.get("nick_name")),
         text=text,
-        likes=_int(stats.get("liked_count") or stats.get("like_count")),
-        comments=_int(stats.get("comment_count")),
-        shares=_int(stats.get("share_count")),
-        saves=_int(stats.get("collected_count") or stats.get("collect_count")),
+        likes=_int(stats.get("liked_count") or stats.get("like_count") or card.get("nice_count")),
+        comments=_int(stats.get("comment_count") or card.get("comments_count")),
+        shares=_int(stats.get("share_count") or card.get("shared_count")),
+        saves=_int(stats.get("collected_count") or stats.get("collect_count") or card.get("collected_count")),
         collected_at=_now(),
     )
 
 
 def _cursor(body: dict[str, Any], *, next_page: int | None = None) -> str | None:
-    if not body.get("has_more"):
+    nested = body.get("data") if isinstance(body.get("data"), dict) else None
+    has_more = body.get("has_more") if body.get("has_more") is not None else nested.get("has_more") if nested else None
+    if not has_more:
         return None
     state = {}
-    for key in ("cursor", "search_id"):
+    for key in ("cursor", "search_id", "search_session_id"):
         if body.get(key) is not None:
             state[key] = body[key]
     if next_page is not None:
         state["page"] = next_page
     return json.dumps(state, ensure_ascii=False, separators=(",", ":"))
+
+
+def _has_more(body: dict[str, Any]) -> bool:
+    if body.get("has_more") is not None:
+        return bool(body.get("has_more"))
+    nested = body.get("data")
+    return _has_more(nested) if isinstance(nested, dict) else False
 
 
 def _decode(cursor: str | None) -> dict[str, Any]:
@@ -111,6 +126,26 @@ def _one_of(first: Any, second: Any, names: str) -> None:
         raise ValueError(f"provide exactly one of {names}")
 
 
+def _find_note(value: Any) -> dict[str, Any] | None:
+    if isinstance(value, dict):
+        for key in ("note", "note_detail"):
+            if isinstance(value.get(key), dict):
+                return value[key]
+        notes = value.get("note_list")
+        if isinstance(notes, list) and notes and isinstance(notes[0], dict):
+            return notes[0]
+        for nested in value.values():
+            found = _find_note(nested)
+            if found:
+                return found
+    elif isinstance(value, list):
+        for nested in value:
+            found = _find_note(nested)
+            if found:
+                return found
+    return None
+
+
 class XiaohongshuAdapter:
     def __init__(self, client: Any):
         self.client = client
@@ -119,11 +154,12 @@ class XiaohongshuAdapter:
         state = _decode(cursor)
         page = int(state.get("page", page))
         params = {"keyword": keyword, "page": page}
-        if state.get("search_id"):
-            params["search_id"] = state["search_id"]
+        for key in ("search_id", "search_session_id"):
+            if state.get(key):
+                params[key] = state[key]
         raw = self.client.get(SEARCH_NOTES, params).data
         body = _body(raw)
-        return Page([_post(x) for x in _items(body, "items", "notes")], _cursor(body, next_page=page + 1), bool(body.get("has_more")), raw)
+        return Page([_post(x) for x in _items(body, "items", "notes")], _cursor(body, next_page=page + 1), _has_more(body), raw)
 
     def search_accounts(self, keyword: str, *, page: int = 1, cursor: str | None = None) -> Page[Account]:
         state = _decode(cursor)
@@ -153,7 +189,7 @@ class XiaohongshuAdapter:
         params = {"note_id": note_id} if note_id else {"share_text": share_text}
         raw = self.client.get(VIDEO_NOTE if video else IMAGE_NOTE, params).data
         body = _body(raw)
-        note = body.get("note") or body.get("note_detail")
+        note = _find_note(body)
         if not isinstance(note, dict):
             raise XiaohongshuAvailabilityError("Xiaohongshu note is unavailable")
         return _post(note)

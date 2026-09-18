@@ -70,6 +70,16 @@ def _list(body: dict[str, Any], *keys: str) -> list[dict[str, Any]]:
         return _list(nested, *keys)
     if isinstance(nested, list):
         return [item for item in nested if isinstance(item, dict)]
+    business = body.get("business_data")
+    if isinstance(business, list):
+        results = []
+        for item in business:
+            if not isinstance(item, dict):
+                continue
+            value = item.get("data")
+            if isinstance(value, dict) and isinstance(value.get("aweme_info"), dict):
+                results.append(value)
+        return results
     return []
 
 
@@ -78,13 +88,21 @@ def _cursor(body: dict[str, Any]) -> str | None:
         if body.get(key) is not None:
             return str(body[key])
     nested = body.get("data")
-    return _cursor(nested) if isinstance(nested, dict) else None
+    if isinstance(nested, dict):
+        return _cursor(nested)
+    config = body.get("business_config")
+    if isinstance(config, dict) and isinstance(config.get("next_page"), dict):
+        value = config["next_page"].get("cursor")
+        return str(value) if value is not None else None
+    return None
 
 
 def _has_more(body: dict[str, Any]) -> bool:
     value = body.get("has_more")
     if value is None and isinstance(body.get("data"), dict):
         return _has_more(body["data"])
+    if value is None and isinstance(body.get("business_config"), dict):
+        value = body["business_config"].get("has_more")
     return value is True or value == 1 or value == "1"
 
 
@@ -123,7 +141,11 @@ class DouyinAdapter:
         self.client = client
 
     def search_posts(self, keyword: str, *, cursor: str = "0") -> Page[Post]:
-        raw = self.client.get(VIDEO_SEARCH, {"keyword": keyword, "cursor": cursor}).data
+        raw = self.client.post(VIDEO_SEARCH, {
+            "keyword": keyword, "cursor": int(cursor), "sort_type": "0",
+            "publish_time": "0", "filter_duration": "0", "content_type": "0",
+            "search_id": "", "backtrace": "",
+        }).data
         body = _body(raw)
         return Page([_post(x) for x in _list(body, "aweme_list")], _cursor(body), _has_more(body), raw)
 
