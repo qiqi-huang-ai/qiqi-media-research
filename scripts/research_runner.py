@@ -124,6 +124,10 @@ def execute_request(request: ResearchRequest, *, adapter: Any, output_root: str 
         if not request.entity_id:
             raise ValueError("entity_id is required for this research mode")
         return _execute_post_mode(request, plan, adapter, output_root)
+    if request.mode == "account-audit":
+        if not request.entity_id:
+            raise ValueError("entity_id is required for this research mode")
+        return _execute_account_mode(request, plan, adapter, output_root)
     if "search" not in plan.operations:
         raise ValueError(f"mode {request.mode} requires an explicit entity and is not keyword-executable")
     if request.mode == "cross-platform":
@@ -191,3 +195,34 @@ def _execute_post_mode(request: ResearchRequest, plan: ResearchPlan, adapter: An
     report_path.write_text(render_report(report), encoding="utf-8")
     raw_paths = tuple(root.glob("raw/*/*.json"))
     return ResearchExecution(plan, raw_paths, normalized, report_path)
+
+
+def _execute_account_mode(request: ResearchRequest, plan: ResearchPlan, adapter: Any, output_root: str | Path) -> ResearchExecution:
+    root = Path(output_root)
+    store = RawStore(root)
+    account = adapter.get_account(request.entity_id)
+    posts_page = adapter.get_account_posts(request.entity_id, cursor="0")
+    account_raw = store.save(request.platform, "account", {"account_id": account.account_id, "name": account.name})
+    posts_raw = store.save(request.platform, "account-posts", posts_page.raw)
+    posts = list(posts_page.items)
+    for post in posts:
+        post.raw_path = str(posts_raw)
+    normalized = write_normalized(root, "posts", posts)
+    metrics = compute_post_metrics(posts)
+    report = ResearchReport(
+        title=f"{request.platform} account-audit",
+        summary=f"完成账号 {account.account_id} 的低成本公开资料审计。",
+        task=f"研究模式：account-audit；账号：{request.entity_id}",
+        coverage=f"1 个账号、{len(posts)} 条作品。",
+        findings=[Finding(
+            text=f"样本中 {sum(item.relative_performance is not None for item in metrics)} 条作品具备账号内相对表现数据。",
+            evidence_ids=[f"account:{account.account_id}"] + [f"post:{post.post_id}" for post in posts[:3]],
+            evidence_class="calculated",
+        )],
+        limitations=["仅采集一页账号作品，不代表账号全量表现。"],
+        confidence="low" if len(posts) < 10 else "medium",
+    )
+    report_path = root / "reports" / f"account-audit-{request.platform}.md"
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+    report_path.write_text(render_report(report), encoding="utf-8")
+    return ResearchExecution(plan, (account_raw, posts_raw), normalized, report_path)

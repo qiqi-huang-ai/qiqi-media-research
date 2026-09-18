@@ -44,6 +44,13 @@ class FakeAdapter:
         from scripts.models import Comment
         return Page([Comment(platform="douyin", comment_id="c1", post_id=aweme_id, source_url="https://example/p1", text="多少钱")], None, False, {"comments": ["fixture"]})
 
+    def get_account(self, sec_user_id):
+        from scripts.models import Account
+        return Account(platform="douyin", account_id=sec_user_id, source_url="https://example/a", name="Test")
+
+    def get_account_posts(self, sec_user_id, **kwargs):
+        return self.search_posts("account")
+
 
 def test_execute_keyword_mode_writes_evidence_and_report(tmp_path):
     result = execute_request(
@@ -70,3 +77,13 @@ def test_execute_viral_breakdown_requires_post_id_and_writes_comment_evidence(tm
 def test_entity_modes_require_entity_id():
     with pytest.raises(ValueError, match="entity_id"):
         execute_request(ResearchRequest(mode="comment-mining", platform="douyin", query="评论"), adapter=FakeAdapter(), output_root="/tmp/x")
+
+
+def test_execute_account_audit_requires_entity_id(tmp_path):
+    result = execute_request(
+        ResearchRequest(mode="account-audit", platform="douyin", query="账号审计", entity_id="sec-1"),
+        adapter=FakeAdapter(),
+        output_root=tmp_path,
+    )
+    assert result.report_path.is_file()
+    assert "account-audit" in result.report_path.read_text()
