@@ -7,6 +7,7 @@ endpoint details; semantic interpretation remains evidence-bound report work.
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+import argparse
 
 from scripts.analyze import compute_post_metrics
 from scripts.collect import CollectionPlan, cost_notice, estimate_requests
@@ -339,3 +340,31 @@ def _execute_specialized_keyword_mode(request: ResearchRequest, plan: ResearchPl
     report_path.parent.mkdir(parents=True, exist_ok=True)
     report_path.write_text(render_report(report), encoding="utf-8")
     return ResearchExecution(plan, (raw_path,), normalized, report_path)
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description="Run a bounded qiqi-media-research task")
+    parser.add_argument("--mode", choices=MODES, required=True)
+    parser.add_argument("--platform", choices=sorted(PLATFORMS), required=True)
+    parser.add_argument("--query", required=True)
+    parser.add_argument("--entity-id")
+    parser.add_argument("--secondary-platform", choices=sorted(PLATFORMS))
+    parser.add_argument("--out", default="research-output")
+    args = parser.parse_args()
+    request = ResearchRequest(mode=args.mode, platform=args.platform, query=args.query, entity_id=args.entity_id, secondary_platform=args.secondary_platform)
+    plan = plan_request(request)
+    print(plan.cost_notice)
+    if plan.request_count > 20:
+        parser.error("planned calls exceed the approval threshold")
+    from scripts.api_client import TikHubClient
+    from adapters.douyin import DouyinAdapter
+    from adapters.xiaohongshu import XiaohongshuAdapter
+    client = TikHubClient()
+    adapter = DouyinAdapter(client) if args.platform == "douyin" else XiaohongshuAdapter(client)
+    result = execute_request(request, adapter=adapter, output_root=args.out)
+    print(f"报告已生成：{result.report_path}")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
