@@ -37,6 +37,7 @@ class ResearchRequest:
     platform: str
     query: str
     secondary_platform: str | None = None
+    entity_id: str | None = None
     sample_pages: int = 1
     comment_pages: int = 0
 
@@ -119,6 +120,10 @@ def execute_request(request: ResearchRequest, *, adapter: Any, output_root: str 
     layer. This first slice is enough for low-cost niche/trend/gap research.
     """
     plan = plan_request(request)
+    if request.mode in {"viral-breakdown", "comment-mining"}:
+        if not request.entity_id:
+            raise ValueError("entity_id is required for this research mode")
+        return _execute_post_mode(request, plan, adapter, output_root)
     if "search" not in plan.operations:
         raise ValueError(f"mode {request.mode} requires an explicit entity and is not keyword-executable")
     if request.mode == "cross-platform":
@@ -150,3 +155,39 @@ def execute_request(request: ResearchRequest, *, adapter: Any, output_root: str 
     report_path.parent.mkdir(parents=True, exist_ok=True)
     report_path.write_text(render_report(report), encoding="utf-8")
     return ResearchExecution(plan, (raw_path,), normalized, report_path)
+
+
+def _execute_post_mode(request: ResearchRequest, plan: ResearchPlan, adapter: Any, output_root: str | Path) -> ResearchExecution:
+    root = Path(output_root)
+    store = RawStore(root)
+    if request.platform == "douyin":
+        post = adapter.get_post(aweme_id=request.entity_id)
+        comments_page = adapter.get_comments(request.entity_id) if "comments" in plan.operations else None
+    else:
+        post = adapter.get_post(note_id=request.entity_id)
+        comments_page = adapter.get_comments(note_id=request.entity_id) if "comments" in plan.operations else None
+    post_raw = store.save(request.platform, "post-detail", {"post_id": post.post_id, "source_url": post.source_url})
+    comments = comments_page.items if comments_page else []
+    if comments_page:
+        store.save(request.platform, "comments", comments_page.raw)
+    post.raw_path = str(post_raw)
+    normalized = write_normalized(root, "posts", [post])
+    metrics = compute_post_metrics([post])[0]
+    evidence = [f"post:{post.post_id}"]
+    if comments:
+        evidence.append(f"comment:{comments[0].comment_id}")
+    finding_text = f"作品 {post.post_id} 的互动率为 {metrics.engagement_rate:.4f}。" if metrics.engagement_rate is not None else f"作品 {post.post_id} 缺少足够播放数据，未计算互动率。"
+    report = ResearchReport(
+        title=f"{request.platform} {request.mode}",
+        summary="完成一条作品的详情与评论低成本研究。",
+        task=f"研究模式：{request.mode}；作品：{request.entity_id}",
+        coverage=f"1 条作品、{len(comments)} 条评论。",
+        findings=[Finding(text=finding_text, evidence_ids=evidence, evidence_class="calculated")],
+        limitations=["仅执行单作品切片，未扩展账号或跨平台样本。"],
+        confidence="low",
+    )
+    report_path = root / "reports" / f"{request.mode}-{request.platform}.md"
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+    report_path.write_text(render_report(report), encoding="utf-8")
+    raw_paths = tuple(root.glob("raw/*/*.json"))
+    return ResearchExecution(plan, raw_paths, normalized, report_path)

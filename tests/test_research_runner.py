@@ -34,6 +34,16 @@ class FakeAdapter:
         from scripts.models import Post
         return Page([Post(platform="douyin", post_id="p1", source_url="https://example/p1", author_id="a", views=100, likes=10)], None, False, {"items": ["fixture"]})
 
+    def get_post(self, **kwargs):
+        from adapters.base import Page
+        from scripts.models import Post
+        return Post(platform="douyin", post_id=kwargs["aweme_id"], source_url="https://example/p1", author_id="a", views=100, likes=10)
+
+    def get_comments(self, aweme_id, **kwargs):
+        from adapters.base import Page
+        from scripts.models import Comment
+        return Page([Comment(platform="douyin", comment_id="c1", post_id=aweme_id, source_url="https://example/p1", text="多少钱")], None, False, {"comments": ["fixture"]})
+
 
 def test_execute_keyword_mode_writes_evidence_and_report(tmp_path):
     result = execute_request(
@@ -45,3 +55,18 @@ def test_execute_keyword_mode_writes_evidence_and_report(tmp_path):
     assert result.raw_paths
     assert result.normalized_path.is_file()
     assert "evidence:" in result.report_path.read_text()
+
+
+def test_execute_viral_breakdown_requires_post_id_and_writes_comment_evidence(tmp_path):
+    result = execute_request(
+        ResearchRequest(mode="viral-breakdown", platform="douyin", query="作品拆解", entity_id="p1"),
+        adapter=FakeAdapter(),
+        output_root=tmp_path,
+    )
+    assert result.report_path.is_file()
+    assert "comment:c1" in result.report_path.read_text()
+
+
+def test_entity_modes_require_entity_id():
+    with pytest.raises(ValueError, match="entity_id"):
+        execute_request(ResearchRequest(mode="comment-mining", platform="douyin", query="评论"), adapter=FakeAdapter(), output_root="/tmp/x")
