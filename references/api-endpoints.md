@@ -27,3 +27,15 @@
 - https://tikhub.io/douyin-api
 - https://docs.tikhub.io/186826220e0
 - https://docs.tikhub.io/186826223e0
+
+## 小红书
+
+首版使用当前推荐的 App V2：图片/视频笔记详情、用户资料、用户笔记、评论与子评论、笔记/用户搜索、话题资料与话题内容流。核对路径均位于 `/api/v1/xiaohongshu/app_v2/`。App V2 的推荐状态可能变化，每次发布前必须重新核对官方文档；不调用已弃用的 App V1 或 Web V2/V3。
+
+官方资料：
+
+- https://blog.tikhub.io/zh/article/7
+- https://docs.tikhub.io/420136391e0
+- https://docs.tikhub.io/420136395e0
+- https://docs.tikhub.io/420136396e0
+- https://docs.tikhub.io/420748830e0
