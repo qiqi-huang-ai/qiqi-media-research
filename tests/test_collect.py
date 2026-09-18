@@ -29,7 +29,7 @@ def test_manifest_never_writes_credentials(tmp_path):
         tmp_path,
         platform="douyin",
         operation="search",
-        parameters={"keyword": "AI", "TIKHUB_API_KEY": "secret", "authorization": "Bearer secret"},
+        parameters={"keyword": "AI", "TIKHUB_API_KEY": "secret", "authorization": "Bearer example-secret"},
         request_count=1,
         raw_paths=[tmp_path / "raw.json"],
         failures=[],

@@ -1,4 +1,5 @@
 from pathlib import Path
+import re
 import subprocess
 
 
@@ -59,3 +60,19 @@ def test_agent_bridges_point_to_root_skill_without_copying_it():
         text = bridge.read_text()
         assert "SKILL.md" in text
         assert len(text) < len(root_skill) * 0.35
+
+
+def test_tracked_release_files_have_no_machine_paths_or_reference_package_names():
+    tracked = subprocess.run(
+        ["git", "ls-files"], cwd=ROOT, check=True, capture_output=True, text=True
+    ).stdout.splitlines()
+    forbidden_names = ("konglong" + "-research", "douyin" + "-extractor", "TikHub " + "MCP")
+    for name in tracked:
+        path = ROOT / name
+        if not path.is_file() or path.suffix in {".png", ".jpg", ".zip"}:
+            continue
+        text = path.read_text(errors="ignore")
+        assert "/Users" + "/" not in text
+        assert not any(term in text for term in forbidden_names)
+        tokens = re.findall(r"Bearer\s+([^\s\"']+)", text)
+        assert all(token.startswith(("$", "{", "secret-value", "example")) for token in tokens)
