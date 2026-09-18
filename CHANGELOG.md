@@ -7,7 +7,7 @@
 ### 已完成
 
 - 11 种自媒体研究模式的 Skill 路由和研究规范。
-- TikHub REST-only 架构，Key 只从本机环境读取，不使用 TikHub MCP。
+- TikHub REST-only 架构，Key 只从本机环境读取，不依赖连接器模式。
 - 抖音 App V3 与 Search API 适配。
 - 小红书 App V2 适配。
 - 原始证据、标准化 JSONL、确定性指标、机会评分和证据化 Markdown 报告。
