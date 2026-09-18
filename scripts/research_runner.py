@@ -128,14 +128,16 @@ def execute_request(request: ResearchRequest, *, adapter: Any, output_root: str 
         if not request.entity_id:
             raise ValueError("entity_id is required for this research mode")
         return _execute_account_mode(request, plan, adapter, output_root)
-    if "search" not in plan.operations:
-        raise ValueError(f"mode {request.mode} requires an explicit entity and is not keyword-executable")
     if request.mode == "cross-platform":
         if secondary_adapter is None:
             raise ValueError("cross-platform execution requires two adapters")
         return _execute_cross_platform(request, plan, adapter, secondary_adapter, output_root)
     if request.mode == "trend-scan":
         return _execute_trend_mode(request, plan, adapter, output_root)
+    if request.mode == "competitor-discovery":
+        return _execute_competitor_mode(request, plan, adapter, output_root)
+    if "search" not in plan.operations:
+        raise ValueError(f"mode {request.mode} requires an explicit entity and is not keyword-executable")
 
     root = Path(output_root)
     store = RawStore(root)
@@ -280,3 +282,25 @@ def _execute_trend_mode(request: ResearchRequest, plan: ResearchPlan, adapter: A
     report_path.parent.mkdir(parents=True, exist_ok=True)
     report_path.write_text(render_report(report), encoding="utf-8")
     return ResearchExecution(plan, (raw_path,), trend_path, report_path)
+
+
+def _execute_competitor_mode(request: ResearchRequest, plan: ResearchPlan, adapter: Any, output_root: str | Path) -> ResearchExecution:
+    root = Path(output_root)
+    store = RawStore(root)
+    page = adapter.search_accounts(request.query)
+    raw_path = store.save(request.platform, "account-search", page.raw)
+    normalized = write_normalized(root, "accounts", page.items)
+    evidence = [f"account:{account.account_id}" for account in page.items[:5]]
+    report = ResearchReport(
+        title=f"{request.platform} competitor-discovery",
+        summary=f"完成“{request.query}”的候选对标账号发现。",
+        task=f"研究模式：competitor-discovery；关键词：{request.query}",
+        coverage=f"{len(page.items)} 个候选账号。",
+        findings=[Finding(text=f"发现 {len(page.items)} 个候选账号，需结合账号作品样本进一步筛选。", evidence_ids=evidence or [f"raw:{raw_path.name}"], evidence_class="observed")],
+        limitations=["候选发现不等于对标结论；本次未自动扩展每个账号的作品。"],
+        confidence="low",
+    )
+    report_path = root / "reports" / "competitor-discovery.md"
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+    report_path.write_text(render_report(report), encoding="utf-8")
+    return ResearchExecution(plan, (raw_path,), normalized, report_path)

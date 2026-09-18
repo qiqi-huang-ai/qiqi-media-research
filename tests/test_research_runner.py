@@ -56,6 +56,11 @@ class FakeAdapter:
         from scripts.models import TrendItem
         return Page([TrendItem(platform="douyin", trend_id="t1", title="AI工具", source_url="https://example/t1", rank=1)], None, False, {"trends": ["fixture"]})
 
+    def search_accounts(self, keyword, **kwargs):
+        from adapters.base import Page
+        from scripts.models import Account
+        return Page([Account(platform="douyin", account_id="sec-1", source_url="https://example/a", name="Creator")], None, False, {"users": ["fixture"]})
+
 
 def test_execute_keyword_mode_writes_evidence_and_report(tmp_path):
     result = execute_request(
@@ -113,3 +118,13 @@ def test_execute_trend_scan_writes_trend_evidence(tmp_path):
     )
     assert result.report_path.is_file()
     assert "趋势" in result.report_path.read_text()
+
+
+def test_execute_competitor_discovery_writes_account_evidence(tmp_path):
+    result = execute_request(
+        ResearchRequest(mode="competitor-discovery", platform="douyin", query="AI工具"),
+        adapter=FakeAdapter(),
+        output_root=tmp_path,
+    )
+    assert result.report_path.is_file()
+    assert "account:sec-1" in result.report_path.read_text()

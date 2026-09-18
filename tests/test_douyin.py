@@ -71,3 +71,10 @@ def test_search_maps_live_business_data_shape():
     payload = {"data": {"business_data": [{"data": {"aweme_info": aweme}}]}}
     page = DouyinAdapter(FakeClient(payload)).search_posts("AI")
     assert page.items[0].post_id == "7350810998023949599"
+
+
+def test_search_accounts_maps_user_results():
+    payload = {"data": {"user_list": [{"user_info": {"uid": "u1", "sec_uid": "sec-1", "nickname": "Creator", "follower_count": 1000}}], "cursor": 20, "has_more": 1}}
+    page = DouyinAdapter(FakeClient(payload)).search_accounts("AI")
+    assert page.items[0].account_id == "sec-1"
+    assert page.items[0].followers == 1000

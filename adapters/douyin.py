@@ -149,6 +149,16 @@ class DouyinAdapter:
         body = _body(raw)
         return Page([_post(x) for x in _list(body, "aweme_list")], _cursor(body), _has_more(body), raw)
 
+    def search_accounts(self, keyword: str, *, cursor: str = "0") -> Page[Account]:
+        raw = self.client.post(USER_SEARCH, {"keyword": keyword, "cursor": int(cursor)}).data
+        body = _body(raw)
+        records = []
+        for item in _list(body, "user_list", "users"):
+            user = item.get("user_info") if isinstance(item.get("user_info"), dict) else item
+            account_id = str(user.get("sec_uid") or user.get("uid") or "")
+            records.append(Account(platform="douyin", account_id=account_id, source_url=f"https://www.douyin.com/user/{account_id}", name=_string(user.get("nickname")), bio=_string(user.get("signature")), followers=_int(user.get("follower_count")), following=_int(user.get("following_count")), posts=_int(user.get("aweme_count")), likes_received=_int(user.get("total_favorited")), collected_at=_now()))
+        return Page(records, _cursor(body), _has_more(body), raw)
+
     def get_account(self, sec_user_id: str) -> Account:
         raw = self.client.get(PROFILE, {"sec_user_id": sec_user_id}).data
         body = _body(raw)
