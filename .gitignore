@@ -3,6 +3,7 @@ __pycache__/
 *.py[cod]
 .pytest_cache/
 .venv/
+*.egg-info/
 research-output/
 docs/acceptance/live-artifacts/
 .env
