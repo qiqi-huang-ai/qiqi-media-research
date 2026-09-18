@@ -112,7 +112,7 @@ def plan_request(request: ResearchRequest) -> ResearchPlan:
     return ResearchPlan(request.mode, request.platform, operations, count, cost_notice(request.platform, plan))
 
 
-def execute_request(request: ResearchRequest, *, adapter: Any, output_root: str | Path) -> ResearchExecution:
+def execute_request(request: ResearchRequest, *, adapter: Any, output_root: str | Path, secondary_adapter: Any | None = None) -> ResearchExecution:
     """Execute the bounded keyword-search slice of a research request.
 
     Modes needing an account or post identifier are intentionally not guessed;
@@ -131,7 +131,9 @@ def execute_request(request: ResearchRequest, *, adapter: Any, output_root: str 
     if "search" not in plan.operations:
         raise ValueError(f"mode {request.mode} requires an explicit entity and is not keyword-executable")
     if request.mode == "cross-platform":
-        raise ValueError("cross-platform execution requires two adapters; use plan_request first")
+        if secondary_adapter is None:
+            raise ValueError("cross-platform execution requires two adapters")
+        return _execute_cross_platform(request, plan, adapter, secondary_adapter, output_root)
 
     root = Path(output_root)
     store = RawStore(root)
@@ -226,3 +228,31 @@ def _execute_account_mode(request: ResearchRequest, plan: ResearchPlan, adapter:
     report_path.parent.mkdir(parents=True, exist_ok=True)
     report_path.write_text(render_report(report), encoding="utf-8")
     return ResearchExecution(plan, (account_raw, posts_raw), normalized, report_path)
+
+
+def _execute_cross_platform(request: ResearchRequest, plan: ResearchPlan, adapter: Any, secondary_adapter: Any, output_root: str | Path) -> ResearchExecution:
+    root = Path(output_root)
+    store = RawStore(root)
+    first = adapter.search_posts(request.query, cursor="0")
+    second = secondary_adapter.search_posts(request.query, page=1)
+    first_raw = store.save(request.platform, "search", first.raw)
+    second_raw = store.save(request.secondary_platform or "secondary", "search", second.raw)
+    posts = list(first.items) + list(second.items)
+    for post in posts:
+        post.raw_path = str(first_raw if post.platform == request.platform else second_raw)
+    normalized = write_normalized(root, "posts", posts)
+    metrics = compute_post_metrics(posts)
+    evidence = [f"post:{post.post_id}" for post in posts[:4]]
+    report = ResearchReport(
+        title="cross-platform research",
+        summary=f"完成“{request.query}”在两个平台的一页样本对照。",
+        task=f"研究模式：cross-platform；平台：{request.platform}、{request.secondary_platform}",
+        coverage=f"{request.platform} {len(first.items)} 条；{request.secondary_platform} {len(second.items)} 条。",
+        findings=[Finding(text=f"两个平台共获得 {len(metrics)} 条可分析作品，指标仍按平台分别计算。", evidence_ids=evidence, evidence_class="calculated")],
+        limitations=["仅比较一页样本，不直接比较平台原始热度分。"],
+        confidence="low",
+    )
+    report_path = root / "reports" / "cross-platform.md"
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+    report_path.write_text(render_report(report), encoding="utf-8")
+    return ResearchExecution(plan, (first_raw, second_raw), normalized, report_path)

@@ -87,3 +87,14 @@ def test_execute_account_audit_requires_entity_id(tmp_path):
     )
     assert result.report_path.is_file()
     assert "account-audit" in result.report_path.read_text()
+
+
+def test_execute_cross_platform_requires_and_combines_second_adapter(tmp_path):
+    result = execute_request(
+        ResearchRequest(mode="cross-platform", platform="douyin", secondary_platform="xiaohongshu", query="AI工具"),
+        adapter=FakeAdapter(),
+        secondary_adapter=FakeAdapter(),
+        output_root=tmp_path,
+    )
+    assert result.report_path.is_file()
+    assert "cross-platform" in result.report_path.read_text()
