@@ -51,6 +51,11 @@ class FakeAdapter:
     def get_account_posts(self, sec_user_id, **kwargs):
         return self.search_posts("account")
 
+    def get_trends(self):
+        from adapters.base import Page
+        from scripts.models import TrendItem
+        return Page([TrendItem(platform="douyin", trend_id="t1", title="AI工具", source_url="https://example/t1", rank=1)], None, False, {"trends": ["fixture"]})
+
 
 def test_execute_keyword_mode_writes_evidence_and_report(tmp_path):
     result = execute_request(
@@ -98,3 +103,13 @@ def test_execute_cross_platform_requires_and_combines_second_adapter(tmp_path):
     )
     assert result.report_path.is_file()
     assert "cross-platform" in result.report_path.read_text()
+
+
+def test_execute_trend_scan_writes_trend_evidence(tmp_path):
+    result = execute_request(
+        ResearchRequest(mode="trend-scan", platform="douyin", query="AI工具"),
+        adapter=FakeAdapter(),
+        output_root=tmp_path,
+    )
+    assert result.report_path.is_file()
+    assert "趋势" in result.report_path.read_text()

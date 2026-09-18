@@ -134,6 +134,8 @@ def execute_request(request: ResearchRequest, *, adapter: Any, output_root: str 
         if secondary_adapter is None:
             raise ValueError("cross-platform execution requires two adapters")
         return _execute_cross_platform(request, plan, adapter, secondary_adapter, output_root)
+    if request.mode == "trend-scan":
+        return _execute_trend_mode(request, plan, adapter, output_root)
 
     root = Path(output_root)
     store = RawStore(root)
@@ -256,3 +258,25 @@ def _execute_cross_platform(request: ResearchRequest, plan: ResearchPlan, adapte
     report_path.parent.mkdir(parents=True, exist_ok=True)
     report_path.write_text(render_report(report), encoding="utf-8")
     return ResearchExecution(plan, (first_raw, second_raw), normalized, report_path)
+
+
+def _execute_trend_mode(request: ResearchRequest, plan: ResearchPlan, adapter: Any, output_root: str | Path) -> ResearchExecution:
+    root = Path(output_root)
+    store = RawStore(root)
+    trends_page = adapter.get_trends()
+    raw_path = store.save(request.platform, "trends", trends_page.raw)
+    trend_path = write_normalized(root, "trends", trends_page.items)
+    evidence = [f"trend:{item.trend_id}" for item in trends_page.items[:5]]
+    report = ResearchReport(
+        title=f"{request.platform} trend-scan",
+        summary=f"完成“{request.query}”的低成本趋势扫描。",
+        task=f"研究模式：trend-scan；主题：{request.query}",
+        coverage=f"{len(trends_page.items)} 条趋势项。",
+        findings=[Finding(text=f"当前样本包含 {len(trends_page.items)} 条平台趋势项，需结合关键词搜索判断持续性。", evidence_ids=evidence or [f"raw:{raw_path.name}"], evidence_class="observed")],
+        limitations=["趋势接口样本是当前时点快照，不代表长期趋势。"],
+        confidence="low",
+    )
+    report_path = root / "reports" / "trend-scan.md"
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+    report_path.write_text(render_report(report), encoding="utf-8")
+    return ResearchExecution(plan, (raw_path,), trend_path, report_path)
