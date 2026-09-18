@@ -45,3 +45,17 @@ def test_skill_declares_exact_research_modes():
 def test_skill_does_not_claim_unverified_platforms():
     text = (ROOT / "SKILL.md").read_text()
     assert "已验证：抖音、小红书" in text
+
+
+def test_agent_bridges_point_to_root_skill_without_copying_it():
+    root_skill = (ROOT / "SKILL.md").read_text()
+    bridges = [
+        ROOT / "AGENTS.md",
+        ROOT / "CLAUDE.md",
+        ROOT / ".cursor/rules/qiqi-media-research.mdc",
+        ROOT / "workbuddy/SKILL.md",
+    ]
+    for bridge in bridges:
+        text = bridge.read_text()
+        assert "SKILL.md" in text
+        assert len(text) < len(root_skill) * 0.35

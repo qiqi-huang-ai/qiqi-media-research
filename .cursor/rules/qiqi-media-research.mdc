@@ -1,0 +1,7 @@
+---
+description: qiqi social-media research workflow
+globs: "**/*"
+alwaysApply: false
+---
+
+When a task is social-media research, read the root `SKILL.md` and follow it as the authoritative workflow. Read only its relevant linked references. Preserve credentials, evidence rules, and scope boundaries.
