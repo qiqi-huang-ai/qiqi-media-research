@@ -28,6 +28,8 @@ description: 使用 TikHub REST API 研究公开社媒数据，完成赛道、�
 9. 研究正文完成后，必须额外生成可视化 PDF；按 [references/visual-pdf.md](references/visual-pdf.md) 渲染、检查后交付。PDF 只呈现已有证据，不得替代 Markdown 或制造结论。
 10. 搜索类研究必须输出作品级明细：标题、作者、发布时间、原始链接、播放量及可见互动指标。抖音播放量必须先走独立统计端点；详情接口的 `0` 只能表示未取到，不得写成零播放。
 11. 对“热门原因、用户痛点、开头钩子、内容结构”逐项区分数据事实、样本推断和待验证假设。没有逐字稿或视频画面时，只能说“基于标题/文案的初步判断”，不能冒充已完成视频拆解。
+12. 搜索结果必须按 `published_at` 做本地时间过滤；用户给出“最近 N 天”时，先换算成明确的带时区 `start_at/end_at`，并在 `brief.json` 和报告中记录原始样本、过滤后样本及时间边界。
+13. 每次执行都写出 `brief.json` 和 `analysis/data-quality.json`。质量检查发现身份字段缺失、指标缺失或重复作品时，要降低结论层级并在报告中说明，不得用占位数字补齐。
 
 报告字段、作品明细和 PDF 单一来源规则见 [references/report-quality.md](references/report-quality.md)。
 

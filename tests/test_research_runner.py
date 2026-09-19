@@ -1,6 +1,6 @@
 import pytest
 
-from scripts.research_runner import MODES, ResearchRequest, execute_request, plan_request
+from scripts.research_runner import MODES, ResearchRequest, _filter_posts, execute_request, plan_request
 
 
 def test_all_eleven_modes_have_a_bounded_plan():
@@ -20,6 +20,22 @@ def test_cross_platform_requires_two_platforms():
 def test_unknown_mode_is_rejected():
     with pytest.raises(ValueError, match="unsupported research mode"):
         plan_request(ResearchRequest(mode="video-editing", platform="douyin", query="AI工具"))
+
+
+def test_date_bounds_are_validated():
+    with pytest.raises(ValueError, match="start_at must be earlier"):
+        plan_request(ResearchRequest(mode="niche-discovery", platform="douyin", query="AI工具", start_at="2026-09-20T00:00:00+00:00", end_at="2026-09-19T00:00:00+00:00"))
+
+
+def test_search_results_are_filtered_by_published_at():
+    from scripts.models import Post
+    posts = [
+        Post(platform="douyin", post_id="old", source_url="u", published_at="2026-09-11T23:59:59+00:00"),
+        Post(platform="douyin", post_id="inside", source_url="u", published_at="2026-09-12T00:00:00+00:00"),
+        Post(platform="douyin", post_id="new", source_url="u", published_at="2026-09-19T00:00:01+00:00"),
+    ]
+    result = _filter_posts(posts, "2026-09-12T00:00:00+00:00", "2026-09-19T00:00:00+00:00")
+    assert [post.post_id for post in result] == ["inside"]
 
 
 def test_plan_does_not_claim_exact_price():

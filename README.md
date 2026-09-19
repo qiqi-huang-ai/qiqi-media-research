@@ -43,6 +43,15 @@ python3 -m scripts.research_runner \
   --out research-output/ai-table
 ```
 
+需要严格限定时间范围时，传入带时区的 ISO-8601 边界；结果会先过滤再排名：
+
+```bash
+python3 -m scripts.research_runner \
+  --mode niche-discovery --platform douyin --query "WorkBuddy" \
+  --start-at "2026-09-12T00:00:00+08:00" \
+  --end-at "2026-09-19T23:59:59+08:00"
+```
+
 跨平台研究必须提供第二个平台：
 
 ```bash
@@ -67,7 +76,7 @@ python3 -m scripts.research_runner \
 
 ## 输出目录
 
-`research-output/raw/` 保存原始响应，`normalized/` 保存统一 JSONL，`manifest.json` 记录实际调用清单（不含凭证）。搜索类报告会逐条呈现标题、作者、发布时间、链接、播放量和互动指标，并对热门原因、评论痛点、钩子与结构标明事实/推断边界。
+`research-output/raw/` 保存原始响应，`normalized/` 保存统一 JSONL，`analysis/data-quality.json` 保存字段级质量检查，`brief.json` 记录研究边界和计划/实际调用量，`manifest.json` 记录实际调用清单（不含凭证）。搜索类报告会逐条呈现标题、作者、发布时间、链接、播放量和互动指标，并对热门原因、评论痛点、钩子与结构标明事实/推断边界。
 
 每次研究正文完成后，还会生成一份亮色科技风的可视化 PDF。PDF 规范、命令和验收要求见 [references/visual-pdf.md](references/visual-pdf.md)。
 

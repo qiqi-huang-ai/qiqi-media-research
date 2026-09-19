@@ -37,6 +37,12 @@ def _int(value: Any) -> int | None:
         return None
 
 
+def _metric(value: Any) -> int | None:
+    """Treat the detail endpoint's zero play count as missing, not real data."""
+    parsed = _int(value)
+    return None if parsed == 0 else parsed
+
+
 def _float(value: Any) -> float | None:
     if value is None or isinstance(value, bool):
         return None
@@ -147,7 +153,7 @@ def _post(item: dict[str, Any]) -> Post:
         author_name=_string(author.get("nickname")),
         text=_string(item.get("desc")),
         published_at=_timestamp(item.get("create_time")),
-        views=_int(stats.get("play_count")),
+        views=_metric(stats.get("play_count")),
         likes=_int(stats.get("digg_count")),
         comments=_int(stats.get("comment_count")),
         shares=_int(stats.get("share_count")),

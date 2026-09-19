@@ -108,6 +108,12 @@ def test_video_statistics_uses_aweme_ids_and_maps_play_count():
     assert client.calls[0][1] == {"aweme_ids": "p1"}
 
 
+def test_detail_zero_play_count_is_missing_not_zero():
+    payload = {"data": {"aweme_detail": {"aweme_id": "p1", "desc": "x", "statistics": {"play_count": 0}}}}
+    post = DouyinAdapter(FakeClient(payload)).get_post(aweme_id="p1")
+    assert post.views is None
+
+
 def test_search_accounts_maps_user_results():
     payload = {"data": {"user_list": [{"user_info": {"uid": "u1", "sec_uid": "sec-1", "nickname": "Creator", "follower_count": 1000}}], "cursor": 20, "has_more": 1}}
     page = DouyinAdapter(FakeClient(payload)).search_accounts("AI")

@@ -5,6 +5,7 @@ endpoint details; semantic interpretation remains evidence-bound report work.
 """
 
 from dataclasses import dataclass, replace
+from datetime import datetime, timezone
 import json
 from pathlib import Path
 from typing import Any
@@ -14,6 +15,7 @@ from scripts.analyze import compute_post_metrics, count_comment_signals
 from scripts.collect import CollectionPlan, cost_notice, estimate_requests, write_manifest
 from scripts.normalize import write_normalized
 from scripts.raw_store import RawStore
+from scripts.quality import audit_posts, write_quality
 from scripts.report import Finding, ResearchReport, render_report
 
 
@@ -42,6 +44,8 @@ class ResearchRequest:
     entity_id: str | None = None
     sample_pages: int = 1
     comment_pages: int = 0
+    start_at: str | None = None
+    end_at: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -175,6 +179,12 @@ def _comment_findings(comments: list[Any], post_id: str) -> list[Finding]:
     )]
 
 
+def _window_label(request: ResearchRequest) -> str:
+    if request.start_at or request.end_at:
+        return f"；时间范围 {request.start_at or '未限定'} 至 {request.end_at or '未限定'}（已先过滤再排名）"
+    return "；未设置时间过滤边界"
+
+
 def plan_request(request: ResearchRequest) -> ResearchPlan:
     if request.mode not in MODES:
         raise ValueError(f"unsupported research mode: {request.mode}")
@@ -191,6 +201,10 @@ def plan_request(request: ResearchRequest) -> ResearchPlan:
         raise ValueError("sample_pages must be between 1 and 3")
     if request.comment_pages < 0 or request.comment_pages > 1:
         raise ValueError("comment_pages must be between 0 and 1")
+    _parse_bound(request.start_at, "start_at")
+    _parse_bound(request.end_at, "end_at")
+    if request.start_at and request.end_at and _parse_bound(request.start_at, "start_at") > _parse_bound(request.end_at, "end_at"):
+        raise ValueError("start_at must be earlier than end_at")
 
     operations = _MODE_OPERATIONS[request.mode]
     plan = CollectionPlan(
@@ -260,6 +274,8 @@ def execute_request(request: ResearchRequest, *, adapter: Any, output_root: str 
             "secondary_platform": request.secondary_platform,
             "sample_pages": request.sample_pages,
             "comment_pages": request.comment_pages,
+            "start_at": request.start_at,
+            "end_at": request.end_at,
         },
         request_count=len(result.raw_paths),
         raw_paths=result.raw_paths,
@@ -275,6 +291,8 @@ def execute_request(request: ResearchRequest, *, adapter: Any, output_root: str 
         "entity_id": request.entity_id,
         "sample_pages": request.sample_pages,
         "comment_pages": request.comment_pages,
+        "start_at": request.start_at,
+        "end_at": request.end_at,
         "planned_requests": result.plan.request_count,
         "actual_requests": len(result.raw_paths),
     }, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
@@ -288,11 +306,12 @@ def _execute_keyword_mode(request: ResearchRequest, plan: ResearchPlan, adapter:
     raw_paths += _hydrate_statistics(posts, adapter, store, request.platform)
     normalized = write_normalized(root, "posts", posts)
     metrics = compute_post_metrics(posts)
+    quality = audit_posts(posts)
     report = ResearchReport(
         title=f"{request.platform} {request.mode}",
         summary=f"关键词“{request.query}”完成低成本样本研究。",
         task=f"研究模式：{request.mode}；查询：{request.query}",
-        coverage=f"{len(posts)} 条作品，最多 {request.sample_pages} 页搜索，原始证据已保存。",
+        coverage=f"{len(posts)} 条作品，最多 {request.sample_pages} 页搜索{_window_label(request)}，身份字段完整 {quality.complete_identity}/{quality.total}，指标缺失率 {quality.missing_metric_ratio:.1%}，原始证据已保存。",
         post_details=_post_detail_lines(posts, metrics),
         findings=_keyword_findings(posts, metrics) + ([Finding(
             text=f"样本中 {sum(metric.relative_performance is not None for metric in metrics)} 条作品可计算账号内相对表现。",
@@ -320,6 +339,7 @@ def _execute_post_mode(request: ResearchRequest, plan: ResearchPlan, adapter: An
         comments_page = adapter.get_comments(note_id=request.entity_id) if "comments" in plan.operations else None
     post_raw = store.save(request.platform, "post-detail", _adapter_last_raw(adapter, "post detail"))
     comments = comments_page.items if comments_page else []
+    write_quality(root, audit_posts([post]))
     raw_paths = [post_raw]
     if comments_page:
         comments_raw = store.save(request.platform, "comments", comments_page.raw)
@@ -368,10 +388,12 @@ def _execute_account_mode(request: ResearchRequest, plan: ResearchPlan, adapter:
     account_raw = store.save(request.platform, "account", _adapter_last_raw(adapter, "account"))
     posts_raw = store.save(request.platform, "account-posts", posts_page.raw)
     posts = list(posts_page.items)
+    write_quality(root, audit_posts(posts))
     for post in posts:
         post.raw_path = str(posts_raw)
     normalized = write_normalized(root, "posts", posts)
     metrics = compute_post_metrics(posts)
+    quality = audit_posts(posts)
     report = ResearchReport(
         title=f"{request.platform} account-audit",
         summary=f"完成账号 {account.account_id} 的低成本公开资料审计。",
@@ -401,6 +423,7 @@ def _execute_cross_platform(request: ResearchRequest, plan: ResearchPlan, adapte
     first_raw_paths += _hydrate_statistics(first_posts, adapter, store, request.platform)
     second_raw_paths += _hydrate_statistics(second_posts, secondary_adapter, store, request.secondary_platform or "")
     posts = first_posts + second_posts
+    write_quality(root, audit_posts(posts))
     normalized = write_normalized(root, "posts", posts)
     metrics = compute_post_metrics(posts)
     evidence = [f"post:{post.post_id}" for post in posts[:4]]
@@ -471,6 +494,7 @@ def _execute_specialized_keyword_mode(request: ResearchRequest, plan: ResearchPl
     raw_paths += _hydrate_statistics(posts, adapter, store, request.platform)
     normalized = write_normalized(root, "posts", posts)
     metrics = compute_post_metrics(posts)
+    quality = audit_posts(posts)
     evidence = [f"post:{post.post_id}" for post in posts[:5]] or [f"raw:{raw_paths[0].name}"]
     labels = {
         "content-gap": ("内容空白", "供给与需求"),
@@ -483,7 +507,7 @@ def _execute_specialized_keyword_mode(request: ResearchRequest, plan: ResearchPl
         title=f"{request.platform} {request.mode}",
         summary=f"完成“{request.query}”的{section}分析。",
         task=f"研究模式：{request.mode}；关键词：{request.query}",
-        coverage=f"{len(posts)} 条搜索作品，{sum(metric.engagement_rate is not None for metric in metrics)} 条可计算互动率。",
+        coverage=f"{len(posts)} 条搜索作品，{sum(metric.engagement_rate is not None for metric in metrics)} 条可计算互动率{_window_label(request)}；身份字段完整 {quality.complete_identity}/{quality.total}，指标缺失率 {quality.missing_metric_ratio:.1%}。",
         post_details=_post_detail_lines(posts, metrics),
         findings=_keyword_findings(posts, metrics) + [Finding(text=f"本次以 {analysis} 为分析框架，样本需继续扩展后再形成高置信结论。", evidence_ids=evidence, evidence_class="interpreted")],
         limitations=["本次以一页关键词样本识别方向，不把样本外信息写成结论；建议用后续样本验证供需和选题持续性。"],
@@ -509,7 +533,48 @@ def _search_posts(request: ResearchRequest, adapter: Any, store: RawStore) -> tu
         if not page.has_more or page.next_cursor is None:
             break
         cursor = page.next_cursor
-    return posts, raw_paths
+    filtered = _filter_posts(posts, request.start_at, request.end_at)
+    write_quality(store.root, audit_posts(filtered))
+    filter_report = store.root / "analysis" / "search-filter.json"
+    filter_report.parent.mkdir(parents=True, exist_ok=True)
+    filter_report.write_text(json.dumps({
+        "raw_result_count": len(posts),
+        "filtered_result_count": len(filtered),
+        "start_at": request.start_at,
+        "end_at": request.end_at,
+        "excluded_count": len(posts) - len(filtered),
+    }, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    return filtered, raw_paths
+
+
+def _parse_bound(value: str | None, name: str) -> datetime | None:
+    if not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError as error:
+        raise ValueError(f"{name} must be an ISO-8601 datetime") from error
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def _filter_posts(posts: list[Any], start_at: str | None, end_at: str | None) -> list[Any]:
+    start = _parse_bound(start_at, "start_at")
+    end = _parse_bound(end_at, "end_at")
+    if not start and not end:
+        return posts
+    kept: list[Any] = []
+    for post in posts:
+        published = _parse_bound(post.published_at, "published_at")
+        if published is None:
+            continue
+        if start and published < start:
+            continue
+        if end and published > end:
+            continue
+        kept.append(post)
+    return kept
 
 
 def _hydrate_statistics(posts: list[Any], adapter: Any, store: RawStore, platform: str) -> list[Path]:
@@ -545,9 +610,11 @@ def main() -> int:
     parser.add_argument("--entity-id")
     parser.add_argument("--secondary-platform", choices=sorted(PLATFORMS))
     parser.add_argument("--sample-pages", type=int, default=1)
+    parser.add_argument("--start-at", help="ISO-8601 UTC or timezone-aware lower bound")
+    parser.add_argument("--end-at", help="ISO-8601 UTC or timezone-aware upper bound")
     parser.add_argument("--out", default="research-output")
     args = parser.parse_args()
-    request = ResearchRequest(mode=args.mode, platform=args.platform, query=args.query, entity_id=args.entity_id, secondary_platform=args.secondary_platform, sample_pages=args.sample_pages)
+    request = ResearchRequest(mode=args.mode, platform=args.platform, query=args.query, entity_id=args.entity_id, secondary_platform=args.secondary_platform, sample_pages=args.sample_pages, start_at=args.start_at, end_at=args.end_at)
     plan = plan_request(request)
     print(plan.cost_notice)
     if plan.request_count > 20:
