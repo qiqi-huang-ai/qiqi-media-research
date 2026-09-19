@@ -104,13 +104,14 @@ def audit_delivery(root: str | Path, report_path: str | Path) -> DeliveryAudit:
         account_path = root / "normalized" / "accounts.jsonl"
         add("required_account_profile", account_path.is_file() and "账号事实：" in report_text, "账号资料已标准化并进入报告")
     if "account-baseline" in requirements:
-        add("required_account_baseline", "表现基线：" in report_text, "账号样本表现基线已计算")
+        add("required_account_baseline", ("表现基线：" in report_text or "近期表现基线：" in report_text), "账号样本表现基线已计算")
     if "account-patterns" in requirements:
-        add("required_account_patterns", "标题/文案模式：" in report_text, "标题/文案模式已按样本统计")
+        add("required_account_patterns", "标题/文案模式：" in report_text and "内容组合：" in report_text, "标题模式与互斥主题组合已按样本统计")
     if "top-bottom-comparison" in requirements:
         add("required_top_bottom_comparison", "分组对照：" in report_text, "高表现与低表现样本已对照")
     if "actionable-recommendations" in requirements:
-        add("required_actionable_recommendations", "可执行建议：" in report_text, "建议已连接到样本基线和模式")
+        recommendation_count = report_text.count("可执行建议")
+        add("required_actionable_recommendations", recommendation_count >= (3 if mode == "account-audit" else 1), f"已生成 {recommendation_count} 条连接样本基线和模式的建议")
     if "mature-mode-report" in requirements:
         required_sections = {
             "niche-discovery": ("核心发现", "赛道与趋势", "高表现内容", "建议选题与下一步"),
@@ -127,9 +128,27 @@ def audit_delivery(root: str | Path, report_path: str | Path) -> DeliveryAudit:
         }.get(mode, ())
         missing_sections = [title for title in required_sections if not _meaningful_section(report_text, title)]
         add("required_mature_mode_report", not missing_sections, "模式核心问题均已回答" if not missing_sections else f"缺少成熟分析章节：{', '.join(missing_sections)}")
+        if mode == "account-audit":
+            finding_count = len(ledger)
+            required_markers = {
+                "账号定位：": "账号定位",
+                "样本边界：": "近期/历史样本边界",
+                "近期更新节奏：": "近期更新节奏",
+                "内容组合：": "内容组合",
+                "标题钩子模式：": "标题钩子模式",
+                "稳定规律：": "稳定规律",
+                "偶发爆款：": "偶发爆款",
+                "可复制：": "可复制边界",
+                "当前无法验证：": "待验证边界",
+            }
+            missing_markers = [label for marker, label in required_markers.items() if marker not in report_text]
+            add("account_analysis_density", finding_count >= 18 and not missing_markers,
+                f"账号审计结论 {finding_count} 条；" + ("必要分析项齐全" if not missing_markers else f"缺少：{', '.join(missing_markers)}"))
 
     essential = {"research_brief", "manifest", "raw_evidence", "normalized_data", "report", "evidence_ledger", "identity_fields", "duplicate_posts", "zero_view_semantics", "source_links", "visible_metrics", "time_filter"}
     essential.update(check.name for check in checks if check.name.startswith("required_"))
+    if mode == "account-audit":
+        essential.add("account_analysis_density")
     failed_essential = [check for check in checks if check.name in essential and not check.passed]
     status = "failed" if failed_essential else "ready" if all(check.passed for check in checks) else "ready_with_caveats"
     return DeliveryAudit(status, tuple(checks))

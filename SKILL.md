@@ -25,7 +25,7 @@ description: 使用 TikHub REST API 研究公开社媒数据，完成赛道、�
 4. 用 `scripts.collect.CollectionPlan` 估算调用次数并说明端点族。默认先取 1–3 个样本；超过 20 次调用须先取得用户明确同意。
 5. 遇到 `401/403` 停止并提示检查权限；遇到 `402` 停止并提示额度或计费问题，不自动重试付费失败。
 6. 每次请求先以 `RawStore` 保存原始响应，再写入 `normalized/*.jsonl` 和不含凭证的 `manifest.json`。
-7. 先运行 `scripts.analyze` 与 `scripts.score` 的确定性计算，再进行语义解释。不得让语言模型改写原始数值。
+7. 先运行 `scripts.analyze` 与 `scripts.score` 的确定性计算，再进行语义整理。语义层只能解释标准化数据，不得让语言模型改写原始数值；账号审计不得把脚本的账号画像和 Top 作品当作最终交付。
 8. 用 `scripts.report` 输出报告。每条关键发现必须在 `analysis/findings.json` 中保留内部证据类别和 evidence ID；面向用户的 Markdown 和 PDF 只呈现自然语言，不显示机器标签。局限部分使用“结论层级、研究边界、下一步验证”，不要写成缺陷清单。
 9. 研究正文完成后，必须额外生成可视化 PDF；按 [references/visual-pdf.md](references/visual-pdf.md) 渲染、检查后交付。PDF 只呈现已有证据，不得替代 Markdown 或制造结论。
 10. 搜索类研究必须输出作品级明细：标题、作者、发布时间、原始链接、播放量及可见互动指标。抖音播放量必须先走独立统计端点；详情接口的 `0` 只能表示未取到，不得写成零播放。
@@ -33,6 +33,7 @@ description: 使用 TikHub REST API 研究公开社媒数据，完成赛道、�
 12. 搜索结果必须按 `published_at` 做本地时间过滤；用户给出“最近 N 天”时，先换算成明确的带时区 `start_at/end_at`，并在 `brief.json` 和报告中记录原始样本、过滤后样本及时间边界。
 13. 每次执行都写出 `brief.json` 和 `analysis/data-quality.json`。质量检查发现身份字段缺失、指标缺失或重复作品时，要降低结论层级并在报告中说明，不得用占位数字补齐。
 14. 交付前对最终 Markdown 运行 `python3 -m scripts.delivery_audit <研究根目录> --report <最终报告>`，再读取 `analysis/delivery-audit.json`：`failed` 不得包装成成熟报告；`ready_with_caveats` 必须把具体缺口写入研究边界；只有 `ready` 才能声称数据链路验收通过。
+14. 交付前对最终 Markdown 运行 `python3 -m scripts.delivery_audit <研究根目录> --report <最终报告>`，再读取 `analysis/delivery-audit.json`：`failed` 不得包装成成熟报告；`ready_with_caveats` 必须把具体缺口写入研究边界；只有 `ready` 才能声称数据链路验收通过。账号审计另需通过 18+ 条结论和近期/历史、稳定/偶发、可复制/待验证等硬检。
 15. 报告不能只列 Top 内容：凡模式涉及账号、选题或趋势，都要建立中位数基线，并把高表现与普通/低表现样本进行对照。不能计算时明确说明缺少哪类公开数据。
 
 用户同时要求热门内容、用户痛点和选题时，不得只跑一次关键词搜索。组合执行：搜索与时间过滤 → 高表现及普通基线作品详情/统计 → 代表作品评论 → 评论聚合 → 选题。各阶段共享已有原始数据，避免重复调用。

@@ -78,7 +78,11 @@ def render_report(report: ResearchReport) -> str:
         elif section == "数据覆盖":
             content = _escape(report.coverage)
         elif section == "原始作品明细":
-            content = "\n".join(f"- {_escape(item)}" for item in report.post_details) or "- 本次报告未包含作品级明细。"
+            rendered_details = []
+            for item in report.post_details:
+                escaped = _escape(item)
+                rendered_details.append(escaped if item.startswith("|") else f"- {escaped}")
+            content = "\n".join(rendered_details) or "- 本次报告未包含作品级明细。"
         elif section == "局限与置信度":
             limitations = [f"- {_escape(item)}" for item in report.limitations] or ["- 本次研究边界已在数据覆盖中说明。"]
             validations = report.validation_steps or _default_validation_steps(report.confidence)

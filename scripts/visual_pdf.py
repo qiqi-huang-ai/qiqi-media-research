@@ -52,7 +52,7 @@ def render_pdf(input_path: Path, output_path: Path, *, period: str = "", source_
     from reportlab.lib.units import mm
     from reportlab.pdfbase import pdfmetrics
     from reportlab.pdfbase.ttfonts import TTFont
-    from reportlab.platypus import KeepTogether, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
+    from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 
     pdfmetrics.registerFont(TTFont("QiqiSans", "/System/Library/Fonts/STHeiti Medium.ttc", subfontIndex=0))
     title, sections = parse_markdown(input_path.read_text(encoding="utf-8"))
@@ -95,17 +95,19 @@ def render_pdf(input_path: Path, output_path: Path, *, period: str = "", source_
     story.extend([Table([card_cells], colWidths=[54 * mm] * 3), Spacer(1, 8 * mm)])
 
     for index, item in enumerate(sections):
-        items = [Paragraph(f"{index + 1:02d}  {item.title}", section)]
+        rows = [[Paragraph(f"{index + 1:02d}  {item.title}", section)]]
         for line in item.lines:
             safe = line.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-            items.append(Paragraph(f"- {safe}", bullet))
-        block = Table([[items]], colWidths=[178 * mm])
+            rows.append([Paragraph(f"- {safe}", bullet)])
+        # Keep each line as a row so long sections (especially raw work lists)
+        # can split across pages instead of becoming one oversized table cell.
+        block = Table(rows, colWidths=[178 * mm], repeatRows=1)
         block.setStyle(TableStyle([
             ("BACKGROUND", (0, 0), (-1, -1), colors.white), ("LINEBEFORE", (0, 0), (0, -1), 3, cyan if index % 2 == 0 else lime),
             ("BOX", (0, 0), (-1, -1), 0.4, colors.HexColor("#DCE4F0")), ("LEFTPADDING", (0, 0), (-1, -1), 7 * mm),
             ("RIGHTPADDING", (0, 0), (-1, -1), 7 * mm), ("TOPPADDING", (0, 0), (-1, -1), 5 * mm), ("BOTTOMPADDING", (0, 0), (-1, -1), 5 * mm),
         ]))
-        story.extend([KeepTogether(block), Spacer(1, 4 * mm)])
+        story.extend([block, Spacer(1, 4 * mm)])
 
     def page(canvas, document):
         canvas.saveState()

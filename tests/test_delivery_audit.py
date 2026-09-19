@@ -68,3 +68,23 @@ def test_short_prompt_mode_contract_blocks_a_skeletal_report(tmp_path):
     assert result.status == "failed"
     check = next(item for item in result.checks if item.name == "required_mature_mode_report")
     assert "建议选题与下一步" in check.detail
+
+
+def test_account_audit_density_blocks_top_only_report(tmp_path):
+    _write_json(tmp_path / "brief.json", {
+        "mode": "account-audit",
+        "requirements": ["mature-mode-report", "account-profile", "account-baseline", "account-patterns", "top-bottom-comparison", "actionable-recommendations"],
+    })
+    _write_json(tmp_path / "manifest.json", {})
+    _write_json(tmp_path / "raw/douyin/account-a.json", {})
+    _write_json(tmp_path / "raw/douyin/account-posts-a.json", {})
+    _write_json(tmp_path / "normalized/accounts.jsonl", {"account_id": "a1", "source_url": "https://example/a"})
+    _write_json(tmp_path / "normalized/posts.jsonl", {"post_id": "p1", "source_url": "https://example/p1", "views": 100})
+    _write_ledger(tmp_path)
+    report = tmp_path / "reports/report.md"
+    report.parent.mkdir(parents=True)
+    report.write_text("# report\n\n## 对标账号\n\n- 账号事实：a\n\n## 核心发现\n\n- 表现基线：100\n\n## 高表现内容\n\n- 分组对照：top/bottom\n\n## 评论需求\n\n- 评论覆盖：1\n\n## 建议选题与下一步\n\n- 可执行建议：做内容\n", encoding="utf-8")
+    result = audit_delivery(tmp_path, report)
+    assert result.status == "failed"
+    density = next(item for item in result.checks if item.name == "account_analysis_density")
+    assert not density.passed

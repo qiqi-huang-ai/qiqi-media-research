@@ -5,7 +5,8 @@ endpoint details; semantic interpretation remains evidence-bound report work.
 """
 
 from dataclasses import dataclass, replace
-from datetime import datetime, timezone
+from collections import Counter, defaultdict
+from datetime import datetime, timedelta, timezone
 import json
 from pathlib import Path
 from statistics import median
@@ -285,6 +286,49 @@ def _title_signals(text: str | None) -> set[str]:
     return {label for label, words in groups.items() if any(word in content for word in words)}
 
 
+def _primary_content_type(text: str | None) -> str:
+    content = (text or "").casefold()
+    groups = (
+        ("教程/实操", ("如何", "怎么", "教程", "手把手", "实操", "步骤", "指南")),
+        ("Prompt/工作流", ("prompt", "提示词", "工作流", "自动化", "agent")),
+        ("产品/测评", ("工具", "上线", "发布", "更新", "测评", "实测", "功能")),
+        ("行业影响/风险", ("完蛋", "淘汰", "失业", "灭绝", "危机", "骗局", "封号", "风险")),
+        ("观点/解释", ("为什么", "意味着", "聊聊", "看懂", "真相", "本质", "怎么看")),
+        ("案例/人物", ("案例", "故事", "创始人", "公司", "用户")),
+    )
+    return next((label for label, words in groups if any(word in content for word in words)), "其他")
+
+
+def _hook_types(text: str | None) -> set[str]:
+    content = (text or "").casefold()
+    groups = {
+        "冲突/危机": ("完蛋", "淘汰", "失业", "灭绝", "危机", "骗局", "黑暗"),
+        "问题式": ("为什么", "怎么", "如何", "吗？", "呢？"),
+        "数字/清单": ("1个", "2个", "3个", "5个", "10个", "清单", "步"),
+        "时效/新闻": ("上线", "发布", "更新", "最新", "刚刚", "今天"),
+        "低门槛承诺": ("新手", "小白", "零基础", "保姆级", "一分钟", "30秒"),
+        "反常识/好奇": ("竟然", "没想到", "真相", "你不知道", "原来"),
+    }
+    return {label for label, words in groups.items() if any(word in content for word in words)} or {"直述主题"}
+
+
+def _published_datetime(post: Any) -> datetime | None:
+    try:
+        return datetime.fromisoformat(post.published_at.replace("Z", "+00:00")) if post.published_at else None
+    except (AttributeError, ValueError):
+        return None
+
+
+def _post_value(post: Any, basis: str) -> float:
+    value = post.views if basis == "播放" else post.likes
+    return float(value or 0)
+
+
+def _metric_median(posts: list[Any], basis: str) -> float | None:
+    values = _positive_values([post.views if basis == "播放" else post.likes for post in posts])
+    return median(values) if values else None
+
+
 def _account_findings(account: Any, posts: list[Any], metrics: list[Any], comments: list[Any]) -> list[Finding]:
     account_evidence = [f"account:{account.account_id}"]
     post_evidence = [f"post:{post.post_id}" for post in posts]
@@ -302,22 +346,42 @@ def _account_findings(account: Any, posts: list[Any], metrics: list[Any], commen
     if not posts:
         return findings
 
-    ranked = [post for post in posts if (post.views or post.likes or 0) > 0]
+    dated = [(post, _published_datetime(post)) for post in posts]
+    valid_dates = [date for _, date in dated if date is not None]
+    latest = max(valid_dates) if valid_dates else None
+    cutoff = latest - timedelta(days=30) if latest else None
+    recent = [post for post, date in dated if date is None or cutoff is None or date >= cutoff]
+    historical = [post for post, date in dated if date is not None and cutoff is not None and date < cutoff]
+    ranked = [post for post in recent if (post.views or post.likes or 0) > 0]
     ranked.sort(key=lambda post: (post.views if post.views is not None else post.likes or 0), reverse=True)
-    view_values = _positive_values([post.views for post in posts])
-    like_values = _positive_values([post.likes for post in posts])
+    view_values = _positive_values([post.views for post in recent])
+    like_values = _positive_values([post.likes for post in recent])
     engagement_values = [
-        metric.engagement_rate for metric in metrics if metric.engagement_rate is not None
+        metric.engagement_rate for metric in metrics
+        if metric.engagement_rate is not None and any(post.post_id == metric.post_id for post in recent)
     ]
     basis = "播放" if view_values else "点赞"
-    basis_values = view_values or like_values
+    basis_values = _positive_values([post.views for post in recent]) or _positive_values([post.likes for post in recent])
     baseline = median(basis_values) if basis_values else None
+    findings.extend([
+        Finding(
+            text=f"账号定位：简介主题为“{(account.bio or '未返回').strip()[:80]}”；近期作品主要覆盖“{' / '.join(item for item, _ in Counter(_primary_content_type(post.text) for post in recent).most_common(3)) or '未能归类'}”。这是基于公开简介和文案主题的内容定位，不是对作者身份的推断。",
+            evidence_ids=[f"post:{post.post_id}" for post in recent[:10]] or post_evidence,
+            evidence_class="interpreted", section="对标账号",
+        ),
+        Finding(
+            text=(f"样本边界：以样本内最新作品 {latest.date()} 为锚点，近 30 天样本 {len(recent)} 条"
+                  f"（{cutoff.date()} 至 {latest.date()}）；另有 {len(historical)} 条更早的历史样本单独处理，不混入近期更新频率。" if latest and cutoff else
+                  f"样本边界：共 {len(posts)} 条；由于发布时间不完整，未拆分近期与历史样本。"),
+            evidence_ids=post_evidence, evidence_class="calculated", section="核心发现",
+        ),
+    ])
     findings.append(Finding(
         text=(
-            f"表现基线：样本 {len(posts)} 条，{basis}中位数 {_format_count(baseline)}；"
+            f"近期表现基线：近 30 天样本 {len(recent)} 条，{basis}中位数 {_format_count(baseline)}；"
             f"点赞中位数 {_format_count(median(like_values) if like_values else None)}；"
             f"互动率中位数 {median(engagement_values):.2%}。" if engagement_values else
-            f"表现基线：样本 {len(posts)} 条，{basis}中位数 {_format_count(baseline)}；"
+            f"近期表现基线：近 30 天样本 {len(recent)} 条，{basis}中位数 {_format_count(baseline)}；"
             f"点赞中位数 {_format_count(median(like_values) if like_values else None)}；互动率因缺少有效播放量未计算。"
         ),
         evidence_ids=post_evidence,
@@ -345,7 +409,7 @@ def _account_findings(account: Any, posts: list[Any], metrics: list[Any], commen
 
     signal_rows = []
     for label in ("教程/方法", "工具/产品", "Prompt/工作流", "冲突/风险", "清单/数字", "观点/解释"):
-        tagged = [post for post in posts if label in _title_signals(post.text)]
+        tagged = [post for post in recent if label in _title_signals(post.text)]
         values = _positive_values([post.views if post.views is not None else post.likes for post in tagged])
         if tagged:
             signal_rows.append((label, len(tagged), median(values) if values else None, tagged))
@@ -395,39 +459,127 @@ def _account_findings(account: Any, posts: list[Any], metrics: list[Any], commen
             ),
         ])
 
-    dates = []
-    for post in posts:
-        try:
-            if post.published_at:
-                dates.append(datetime.fromisoformat(post.published_at.replace("Z", "+00:00")))
-        except ValueError:
-            continue
+    dates = sorted(date for post, date in dated if post in recent and date is not None)
     if len(dates) >= 2:
-        dates.sort()
         span_days = max((dates[-1] - dates[0]).total_seconds() / 86400, 1)
         weekly = (len(dates) - 1) / span_days * 7
         findings.append(Finding(
-            text=f"更新节奏：样本发布时间跨度 {dates[0].date()} 至 {dates[-1].date()}，折算约 {weekly:.1f} 条/周；该值只代表当前样本窗口。",
-            evidence_ids=post_evidence,
+            text=f"近期更新节奏：{dates[0].date()} 至 {dates[-1].date()} 共 {len(dates)} 条，折算约 {weekly:.1f} 条/周；已排除 {len(historical)} 条历史样本。",
+            evidence_ids=[f"post:{post.post_id}" for post in recent],
             evidence_class="calculated",
             section="核心发现",
         ))
 
+    if historical:
+        historical_ranked = sorted(historical, key=lambda post: _post_value(post, basis), reverse=True)
+        findings.append(Finding(
+            text=f"历史高光分离：{len(historical)} 条早期作品不进入近期基线；其中最高为《{_headline(historical_ranked[0].text)}》，{basis} {_format_count(_post_value(historical_ranked[0], basis))}。它是长期高光/疑似置顶样本，不直接代表当前常态。",
+            evidence_ids=[f"post:{post.post_id}" for post in historical_ranked], evidence_class="calculated", section="高表现内容",
+        ))
+
+    category_posts: dict[str, list[Any]] = defaultdict(list)
+    for post in recent:
+        category_posts[_primary_content_type(post.text)].append(post)
+    category_summary = "；".join(
+        f"{label} {len(items)} 条（{basis}中位数 {_format_count(_metric_median(items, basis))}）"
+        for label, items in sorted(category_posts.items(), key=lambda item: (-len(item[1]), item[0]))
+    )
+    findings.append(Finding(
+        text=f"内容组合：{category_summary}。每条作品只记一个主类型，避免多标签重复计数。",
+        evidence_ids=[f"post:{post.post_id}" for post in recent], evidence_class="calculated", section="高表现内容",
+    ))
+    hook_posts: dict[str, list[Any]] = defaultdict(list)
+    for post in recent:
+        for label in _hook_types(post.text):
+            hook_posts[label].append(post)
+    hook_summary = "；".join(
+        f"{label} {len(items)} 条（{basis}中位数 {_format_count(_metric_median(items, basis))}）"
+        for label, items in sorted(hook_posts.items(), key=lambda item: (-len(item[1]), item[0]))
+    )
+    findings.append(Finding(
+        text=f"标题钩子模式：{hook_summary}。这是公开标题/文案信号，不冒充已观看的视频前 3 秒。",
+        evidence_ids=[f"post:{post.post_id}" for post in recent], evidence_class="calculated", section="高表现内容",
+    ))
+
+    chronological = sorted(((post, date) for post, date in dated if post in recent and date is not None), key=lambda item: item[1])
+    if len(chronological) >= 6:
+        midpoint = len(chronological) // 2
+        earlier = [post for post, _ in chronological[:midpoint]]
+        later = [post for post, _ in chronological[midpoint:]]
+        early_median, late_median = _metric_median(earlier, basis), _metric_median(later, basis)
+        direction = "上升" if early_median and late_median and late_median > early_median else "回落或持平"
+        findings.append(Finding(
+            text=f"近期动量：按时间将近期样本对半分组，前半段{basis}中位数 {_format_count(early_median)}，后半段 {_format_count(late_median)}，表现{direction}。",
+            evidence_ids=[f"post:{post.post_id}" for post in earlier + later], evidence_class="calculated", section="赛道与趋势",
+        ))
+
     if comments:
         signals = count_comment_signals(comments, {
-            "使用与配置": ("怎么用", "教程", "安装", "配置", "设置"),
-            "价格与权限": ("多少钱", "收费", "免费", "会员", "权限"),
-            "故障与效果": ("不会", "报错", "失败", "太慢", "没有", "不行"),
-            "资料与模板": ("资料", "模板", "文档", "链接", "代码"),
+            "使用与配置": ("怎么用", "怎么弄", "教程", "安装", "配置", "设置", "求教"),
+            "价格与权限": ("多少钱", "收费", "免费", "会员", "权限", "额度", "邀请码"),
+            "故障与效果": ("不会", "报错", "失败", "太慢", "没有", "不行", "用不了", "卡"),
+            "资料与模板": ("资料", "模板", "文档", "链接", "代码", "提示词", "求分享"),
+            "场景与替代": ("适合", "场景", "能不能", "可以吗", "替代", "平替"),
         })
         covered_posts = len({comment.post_id for comment in comments})
         counts = "；".join(f"{label} {count} 条" for label, count in signals.items())
         findings.append(Finding(
-            text=f"评论需求：抽取 {covered_posts} 条代表作品的 {len(comments)} 条公开评论；{counts}。这是需求信号，不代表全部受众比例。",
+            text=f"评论覆盖：抽取 {covered_posts} 条代表作品的 {len(comments)} 条公开评论；用于发现需求方向，不代表全部受众比例。",
             evidence_ids=[f"comment:{comment.comment_id}" for comment in comments[:10]],
             evidence_class="calculated",
             section="评论需求",
         ))
+        findings.append(Finding(
+            text=f"评论主题：{counts}。未命中词典的评论保留在原始证据中，不强行归类。",
+            evidence_ids=[f"comment:{comment.comment_id}" for comment in comments[:10]], evidence_class="calculated", section="评论需求",
+        ))
+        examples = sorted(comments, key=lambda item: item.likes or 0, reverse=True)
+        examples = [item for item in examples if (item.text or "").strip()][:3]
+        if examples:
+            findings.append(Finding(
+                text="代表性评论：" + "；".join(f"“{item.text.strip()[:80]}”" for item in examples) + "。",
+                evidence_ids=[f"comment:{item.comment_id}" for item in examples], evidence_class="observed", section="评论需求",
+            ))
+
+    repeated_categories = [(label, items) for label, items in category_posts.items() if len(items) >= 2]
+    non_generic_categories = [item for item in repeated_categories if item[0] != "其他"]
+    strongest_category = max(non_generic_categories or repeated_categories, key=lambda item: _metric_median(item[1], basis) or 0) if repeated_categories else None
+    top_post = ranked[0] if ranked else None
+    stable_evidence = [f"post:{post.post_id}" for post in (strongest_category[1] if strongest_category else ranked[:3])]
+    findings.extend([
+        Finding(
+            text=(f"稳定规律：“{strongest_category[0]}”在近期至少出现 {len(strongest_category[1])} 次，且{basis}中位数 {_format_count(_metric_median(strongest_category[1], basis))}；可作为连续测试方向。" if strongest_category else
+                  "稳定规律：近期各内容类型重复不足，目前不能把单条高表现写成稳定公式。"),
+            evidence_ids=stable_evidence or post_evidence, evidence_class="interpreted", section="机会排序",
+        ),
+        Finding(
+            text=(f"偶发爆款：《{_headline(top_post.text)}》为近期样本最高表现，但在同类主题未重复出现前，只按单条高表现处理。" if top_post else
+                  "偶发爆款：样本缺少可用表现指标，无法判定。"),
+            evidence_ids=[f"post:{top_post.post_id}"] if top_post else post_evidence, evidence_class="interpreted", section="机会排序",
+        ),
+        Finding(
+            text="可复制：主题选择、标题钩子类型、更新频率和内容系列化可以结合自身业务重写，不复制原标题和表达。",
+            evidence_ids=stable_evidence or post_evidence, evidence_class="interpreted", section="内容空白",
+        ),
+        Finding(
+            text="谨慎复制：冲突性强、依赖时效或作者个人影响力的单条高表现，必须经过自己账号的多条测试才能升级为方法。",
+            evidence_ids=[f"post:{post.post_id}" for post in ranked[:3]] or post_evidence, evidence_class="interpreted", section="内容空白",
+        ),
+        Finding(
+            text="当前无法验证：没有视频画面、逐字稿、完播率和关注转化数据，因此不对真实前 3 秒、叙事节奏或涨粉贡献做结论。",
+            evidence_ids=post_evidence, evidence_class="observed", section="内容空白",
+        ),
+        Finding(
+            text="内容空白：优先找“评论里重复追问、但近期内容组合中缺少系统回答”的主题；若评论量不足，则只列为待验证假设。",
+            evidence_ids=[f"comment:{comment.comment_id}" for comment in comments[:10]] or post_evidence, evidence_class="interpreted", section="内容空白",
+        ),
+    ])
+    action_theme = strongest_category[0] if strongest_category else "近期高表现主题"
+    findings.extend([
+        Finding(text=f"可执行建议 1：围绕“{action_theme}”连做 3 条原创内容，分别测试问题式、数字式和结果承诺式标题，统一以近期{basis}中位数 {_format_count(baseline)} 作为首轮基线。", evidence_ids=stable_evidence or post_evidence, evidence_class="interpreted", section="建议选题与下一步"),
+        Finding(text="可执行建议 2：把评论中的配置、价格、故障或模板问题改写为“一个问题一条视频”，优先选择至少重复出现 2 次的问题。", evidence_ids=[f"comment:{comment.comment_id}" for comment in comments[:10]] or post_evidence, evidence_class="interpreted", section="建议选题与下一步"),
+        Finding(text="可执行建议 3：将历史高光和近期高表现分开跟踪；两轮连续测试均超过近期基线，再将其命名为稳定栏目。", evidence_ids=[f"post:{post.post_id}" for post in recent], evidence_class="interpreted", section="建议选题与下一步"),
+    ])
     return findings
 
 
@@ -702,10 +854,10 @@ def _execute_account_mode(request: ResearchRequest, plan: ResearchPlan, adapter:
         write_normalized(root, "comments", comments)
     report = ResearchReport(
         title=f"{account.name or request.entity_id}｜{request.platform} 对标账号审计",
-        summary=f"已从账号事实、表现基线、作品分组、标题/文案模式、评论需求和可执行借鉴六个层面完成审计。",
+        summary=f"已从账号事实、近期表现基线、历史高光分离、作品分组、标题/文案模式、评论需求和可执行借鉴八个层面完成审计；对未读取的视频内容保留验证边界。",
         task=f"分析公开账号 {account.source_url}；默认目标是判断账号如何做内容、什么表现稳定、哪些打法可借鉴。",
         coverage=(
-            f"1 个账号、{len(posts)} 条近期作品、{len(comments)} 条公开评论；"
+            f"1 个账号、{len(posts)} 条公开作品、{len(comments)} 条公开评论；"
             f"身份字段完整 {quality.complete_identity}/{quality.total}，指标缺失率 {quality.missing_metric_ratio:.1%}。"
         ),
         post_details=_post_detail_lines(posts, metrics),
