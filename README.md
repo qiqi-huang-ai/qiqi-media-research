@@ -67,7 +67,7 @@ python3 -m scripts.research_runner \
 
 ## 输出目录
 
-`research-output/raw/` 保存原始响应，`normalized/` 保存统一 JSONL，`manifest.json` 记录实际调用清单（不含凭证），Markdown 报告记录 evidence ID、覆盖范围和局限。
+`research-output/raw/` 保存原始响应，`normalized/` 保存统一 JSONL，`manifest.json` 记录实际调用清单（不含凭证）。搜索类报告会逐条呈现标题、作者、发布时间、链接、播放量和互动指标，并对热门原因、评论痛点、钩子与结构标明事实/推断边界。
 
 每次研究正文完成后，还会生成一份亮色科技风的可视化 PDF。PDF 规范、命令和验收要求见 [references/visual-pdf.md](references/visual-pdf.md)。
 

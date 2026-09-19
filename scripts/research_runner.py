@@ -5,11 +5,12 @@ endpoint details; semantic interpretation remains evidence-bound report work.
 """
 
 from dataclasses import dataclass, replace
+import json
 from pathlib import Path
 from typing import Any
 import argparse
 
-from scripts.analyze import compute_post_metrics
+from scripts.analyze import compute_post_metrics, count_comment_signals
 from scripts.collect import CollectionPlan, cost_notice, estimate_requests, write_manifest
 from scripts.normalize import write_normalized
 from scripts.raw_store import RawStore
@@ -59,21 +60,119 @@ class ResearchExecution:
     normalized_path: Path
     report_path: Path
     manifest_path: Path | None = None
+    brief_path: Path | None = None
 
 
 _MODE_OPERATIONS: dict[str, tuple[str, ...]] = {
-    "niche-discovery": ("search",),
+    "niche-discovery": ("search", "statistics"),
     "trend-scan": ("trends",),
     "competitor-discovery": ("account_search",),
     "account-audit": ("account", "account_posts"),
     "viral-breakdown": ("post_detail", "statistics", "comments"),
     "comment-mining": ("post_detail", "statistics", "comments"),
-    "content-gap": ("search",),
-    "cross-platform": ("search",),
-    "brand-product": ("search",),
-    "idea-generation": ("search",),
-    "market-map": ("search",),
+    "content-gap": ("search", "statistics"),
+    "cross-platform": ("search", "statistics"),
+    "brand-product": ("search", "statistics"),
+    "idea-generation": ("search", "statistics"),
+    "market-map": ("search", "statistics"),
 }
+
+
+def _headline(text: str | None) -> str:
+    for line in (text or "").splitlines():
+        line = line.strip().lstrip("> ")
+        if line and not line.startswith("#"):
+            return line[:120]
+    return "未提供标题/文案"
+
+
+def _hook_and_structure(text: str | None) -> tuple[str, str]:
+    content = text or ""
+    if any(word in content for word in ("零基础", "新手", "小白", "保姆级")):
+        hook = "以新手身份和低门槛承诺切入"
+    elif any(word in content for word in ("30秒", "一分钟", "一条视频")):
+        hook = "以极短时间和快速结果承诺切入"
+    elif any(word in content for word in ("怎么用", "如何", "手把手", "教程")):
+        hook = "以具体问题或教程承诺切入"
+    else:
+        hook = "仅能根据公开标题/文案判断，需看视频前 5 秒复核"
+    has_steps = any(token in content for token in ("1.", "2.", "3.", "第一", "第二", "从安装", "工作流"))
+    structure = "问题/结果承诺 → 分步操作 → 场景演示 → 收藏或资料 CTA" if has_steps else "标题/文案承诺 → 具体演示（待视频画面复核）"
+    return hook, structure
+
+
+def _post_detail_lines(posts: list[Any], metrics: list[Any]) -> list[str]:
+    metric_by_id = {item.post_id: item for item in metrics}
+    lines: list[str] = []
+    for index, post in enumerate(posts, 1):
+        metric = metric_by_id.get(post.post_id)
+        values = [
+            f"播放 {post.views if post.views is not None else '未返回'}",
+            f"赞 {post.likes if post.likes is not None else '—'}",
+            f"评 {post.comments if post.comments is not None else '—'}",
+            f"转 {post.shares if post.shares is not None else '—'}",
+            f"藏 {post.saves if post.saves is not None else '—'}",
+        ]
+        rate = f"{metric.engagement_rate:.2%}" if metric and metric.engagement_rate is not None else "未计算"
+        hook, structure = _hook_and_structure(post.text)
+        lines.extend([
+            f"{index}. 标题：{_headline(post.text)}",
+            f"作者：{post.author_name or '未提供'}；发布时间：{post.published_at or '未提供'}；视频时长：{post.duration_sec or '未提供'} 秒",
+            f"可见数据：{'；'.join(values)}；互动率：{rate}",
+            f"开头钩子判断：{hook}；内容结构判断：{structure}",
+            f"原始链接：{post.source_url}",
+        ])
+    return lines
+
+
+def _keyword_findings(posts: list[Any], metrics: list[Any]) -> list[Finding]:
+    if not posts:
+        return []
+    ranked = sorted(posts, key=lambda post: (post.views or 0, post.likes or 0), reverse=True)
+    top = ranked[0]
+    top_value = f"播放 {top.views}" if top.views is not None else f"点赞 {top.likes or '未返回'}"
+    hook, structure = _hook_and_structure(top.text)
+    findings = [
+        Finding(
+            text=f"当前样本中表现最高的是《{_headline(top.text)}》，作者为 {top.author_name or '未提供'}，{top_value}；这是样本内高表现，不等同于平台全量爆款。",
+            evidence_ids=[f"post:{top.post_id}"], evidence_class="observed", section="高表现内容",
+        ),
+        Finding(
+            text=f"该作品的初步钩子判断为“{hook}”，候选结构为“{structure}”；若无逐字稿或画面，仍需人工复核。",
+            evidence_ids=[f"post:{top.post_id}"], evidence_class="interpreted", section="核心发现",
+        ),
+    ]
+    buckets = {"入门教程": ("入门", "新手", "小白", "保姆级"), "工作流自动化": ("工作流", "自动化"), "案例实操": ("案例", "实操", "实测")}
+    repeated = []
+    for label, terms in buckets.items():
+        count = sum(any(term in (post.text or "") for term in terms) for post in posts)
+        if count:
+            repeated.append(f"{label} {count}/{len(posts)} 条")
+    if repeated:
+        findings.append(Finding(
+            text="样本主题覆盖：" + "；".join(repeated) + "。多个账号重复出现才可作为方向性趋势，单一账号仍按个案处理。",
+            evidence_ids=[f"post:{post.post_id}" for post in posts[:5]], evidence_class="calculated", section="赛道与趋势",
+        ))
+    return findings
+
+
+def _comment_findings(comments: list[Any], post_id: str) -> list[Finding]:
+    if not comments:
+        return []
+    signals = count_comment_signals(comments, {
+        "使用与配置": ("怎么用", "教程", "安装", "配置", "设置"),
+        "价格与权限": ("多少钱", "收费", "免费", "会员", "权限"),
+        "故障与效果": ("不会", "报错", "失败", "太慢", "没有", "不行"),
+        "资料与模板": ("资料", "模板", "文档", "链接", "代码"),
+    })
+    ranked = sorted(comments, key=lambda item: item.likes or 0, reverse=True)
+    top_examples = [f"“{(item.text or '').strip()[:80]}”" for item in ranked[:3] if item.text]
+    counts = "；".join(f"{key} {value} 条" for key, value in signals.items() if value)
+    evidence = [f"comment:{item.comment_id}" for item in ranked[:3]] or [f"post:{post_id}"]
+    return [Finding(
+        text=f"评论需求信号（样本 {len(comments)} 条）：{counts or '未命中预设问题词'}。代表性评论：{'；'.join(top_examples) or '未返回文本'}。",
+        evidence_ids=evidence, evidence_class="observed", section="评论需求",
+    )]
 
 
 def plan_request(request: ResearchRequest) -> ResearchPlan:
@@ -101,7 +200,10 @@ def plan_request(request: ResearchRequest) -> ResearchPlan:
         post_details=1 if "post_detail" in operations else 0,
         comment_pages=request.comment_pages if "comments" in operations else 0,
         trend_pages=1 if "trends" in operations else 0,
-        statistics=1 if "statistics" in operations else 0,
+        # The statistics endpoint accepts at most two IDs. Hydrate the first
+        # six search results (three calls) so visible ranking claims use real
+        # play counts without turning a default run into an unbounded crawl.
+        statistics=(1 if "post_detail" in operations else (6 if request.mode == "cross-platform" else 3)) if "statistics" in operations and request.platform == "douyin" else 0,
     )
     # A comment operation defaults to one low-cost page when explicitly requested.
     if "comments" in operations and plan.comment_pages == 0:
@@ -163,13 +265,27 @@ def execute_request(request: ResearchRequest, *, adapter: Any, output_root: str 
         raw_paths=result.raw_paths,
         failures=(),
     )
-    return replace(result, manifest_path=manifest)
+    brief = Path(output_root) / "brief.json"
+    brief.parent.mkdir(parents=True, exist_ok=True)
+    brief.write_text(json.dumps({
+        "mode": request.mode,
+        "platform": request.platform,
+        "secondary_platform": request.secondary_platform,
+        "query": request.query,
+        "entity_id": request.entity_id,
+        "sample_pages": request.sample_pages,
+        "comment_pages": request.comment_pages,
+        "planned_requests": result.plan.request_count,
+        "actual_requests": len(result.raw_paths),
+    }, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    return replace(result, manifest_path=manifest, brief_path=brief)
 
 
 def _execute_keyword_mode(request: ResearchRequest, plan: ResearchPlan, adapter: Any, output_root: str | Path) -> ResearchExecution:
     root = Path(output_root)
     store = RawStore(root)
     posts, raw_paths = _search_posts(request, adapter, store)
+    raw_paths += _hydrate_statistics(posts, adapter, store, request.platform)
     normalized = write_normalized(root, "posts", posts)
     metrics = compute_post_metrics(posts)
     report = ResearchReport(
@@ -177,11 +293,11 @@ def _execute_keyword_mode(request: ResearchRequest, plan: ResearchPlan, adapter:
         summary=f"关键词“{request.query}”完成低成本样本研究。",
         task=f"研究模式：{request.mode}；查询：{request.query}",
         coverage=f"{len(posts)} 条作品，最多 {request.sample_pages} 页搜索，原始证据已保存。",
-        findings=[Finding(
+        post_details=_post_detail_lines(posts, metrics),
+        findings=_keyword_findings(posts, metrics) + ([Finding(
             text=f"样本中 {sum(metric.relative_performance is not None for metric in metrics)} 条作品可计算账号内相对表现。",
-            evidence_ids=[f"post:{post.post_id}" for post in posts[:3]],
-            evidence_class="calculated",
-        )] if posts else [],
+            evidence_ids=[f"post:{post.post_id}" for post in posts[:3]], evidence_class="calculated",
+        )] if posts else []),
         limitations=["本次结论聚焦关键词搜索样本，用于近期方向筛选；不外推为平台全量趋势或账号长期表现。"],
         confidence="low" if len(posts) < 10 else "medium",
     )
@@ -229,7 +345,8 @@ def _execute_post_mode(request: ResearchRequest, plan: ResearchPlan, adapter: An
         summary="完成一条作品的详情与评论低成本研究。",
         task=f"研究模式：{request.mode}；作品：{request.entity_id}",
         coverage=f"1 条作品、{len(comments)} 条评论。",
-        findings=[Finding(text=finding_text, evidence_ids=evidence, evidence_class="calculated")],
+        post_details=_post_detail_lines([post], [metrics]),
+        findings=[Finding(text=finding_text, evidence_ids=evidence, evidence_class="calculated")] + _comment_findings(comments, post.post_id),
         limitations=["本次结论聚焦单条公开作品，用于内容拆解；不外推为该账号整体表现或同类作品的普遍规律。"],
         confidence="low",
     )
@@ -260,6 +377,7 @@ def _execute_account_mode(request: ResearchRequest, plan: ResearchPlan, adapter:
         summary=f"完成账号 {account.account_id} 的低成本公开资料审计。",
         task=f"研究模式：account-audit；账号：{request.entity_id}",
         coverage=f"1 个账号、{len(posts)} 条作品。",
+        post_details=_post_detail_lines(posts, metrics),
         findings=[Finding(
             text=f"样本中 {sum(item.relative_performance is not None for item in metrics)} 条作品具备账号内相对表现数据。",
             evidence_ids=[f"account:{account.account_id}"] + [f"post:{post.post_id}" for post in posts[:3]],
@@ -280,6 +398,8 @@ def _execute_cross_platform(request: ResearchRequest, plan: ResearchPlan, adapte
     first_posts, first_raw_paths = _search_posts(request, adapter, store)
     secondary_request = replace(request, platform=request.secondary_platform or "", secondary_platform=None)
     second_posts, second_raw_paths = _search_posts(secondary_request, secondary_adapter, store)
+    first_raw_paths += _hydrate_statistics(first_posts, adapter, store, request.platform)
+    second_raw_paths += _hydrate_statistics(second_posts, secondary_adapter, store, request.secondary_platform or "")
     posts = first_posts + second_posts
     normalized = write_normalized(root, "posts", posts)
     metrics = compute_post_metrics(posts)
@@ -289,6 +409,7 @@ def _execute_cross_platform(request: ResearchRequest, plan: ResearchPlan, adapte
         summary=f"完成“{request.query}”在两个平台的一页样本对照。",
         task=f"研究模式：cross-platform；平台：{request.platform}、{request.secondary_platform}",
         coverage=f"{request.platform} {len(first_posts)} 条；{request.secondary_platform} {len(second_posts)} 条。",
+        post_details=_post_detail_lines(posts, metrics),
         findings=[Finding(text=f"两个平台共获得 {len(metrics)} 条可分析作品，指标仍按平台分别计算。", evidence_ids=evidence, evidence_class="calculated")],
         limitations=["本次比较同一关键词的一页平台内样本；只观察结构和平台内相对表现，不直接比较平台原始热度分。"],
         confidence="low",
@@ -347,6 +468,7 @@ def _execute_specialized_keyword_mode(request: ResearchRequest, plan: ResearchPl
     root = Path(output_root)
     store = RawStore(root)
     posts, raw_paths = _search_posts(request, adapter, store)
+    raw_paths += _hydrate_statistics(posts, adapter, store, request.platform)
     normalized = write_normalized(root, "posts", posts)
     metrics = compute_post_metrics(posts)
     evidence = [f"post:{post.post_id}" for post in posts[:5]] or [f"raw:{raw_paths[0].name}"]
@@ -362,7 +484,8 @@ def _execute_specialized_keyword_mode(request: ResearchRequest, plan: ResearchPl
         summary=f"完成“{request.query}”的{section}分析。",
         task=f"研究模式：{request.mode}；关键词：{request.query}",
         coverage=f"{len(posts)} 条搜索作品，{sum(metric.engagement_rate is not None for metric in metrics)} 条可计算互动率。",
-        findings=[Finding(text=f"本次以 {analysis} 为分析框架，样本需继续扩展后再形成高置信结论。", evidence_ids=evidence, evidence_class="interpreted")],
+        post_details=_post_detail_lines(posts, metrics),
+        findings=_keyword_findings(posts, metrics) + [Finding(text=f"本次以 {analysis} 为分析框架，样本需继续扩展后再形成高置信结论。", evidence_ids=evidence, evidence_class="interpreted")],
         limitations=["本次以一页关键词样本识别方向，不把样本外信息写成结论；建议用后续样本验证供需和选题持续性。"],
         confidence="low",
     )
@@ -387,6 +510,24 @@ def _search_posts(request: ResearchRequest, adapter: Any, store: RawStore) -> tu
             break
         cursor = page.next_cursor
     return posts, raw_paths
+
+
+def _hydrate_statistics(posts: list[Any], adapter: Any, store: RawStore, platform: str) -> list[Path]:
+    """Fill real public view metrics for a bounded search sample."""
+    if platform != "douyin" or not posts or not hasattr(adapter, "get_video_statistics"):
+        return []
+    raw_paths: list[Path] = []
+    for offset in range(0, min(len(posts), 6), 2):
+        batch = posts[offset:offset + 2]
+        stats = adapter.get_video_statistics([post.post_id for post in batch])
+        for post in batch:
+            values = stats.get(post.post_id, {})
+            mapping = {"views": "play_count", "likes": "digg_count", "comments": "comment_count", "shares": "share_count", "saves": "collect_count"}
+            for field, key in mapping.items():
+                if values.get(key) is not None:
+                    setattr(post, field, values[key])
+        raw_paths.append(store.save(platform, "statistics", getattr(adapter, "last_statistics_raw", {})))
+    return raw_paths
 
 
 def _adapter_last_raw(adapter: Any, operation: str) -> dict[str, Any]:

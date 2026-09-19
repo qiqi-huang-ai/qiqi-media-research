@@ -11,6 +11,7 @@ SECTIONS = (
     "结论摘要",
     "研究任务",
     "数据覆盖",
+    "原始作品明细",
     "核心发现",
     "赛道与趋势",
     "对标账号",
@@ -21,7 +22,7 @@ SECTIONS = (
     "建议选题与下一步",
     "局限与置信度",
 )
-FINDING_SECTIONS = set(SECTIONS[3:11])
+FINDING_SECTIONS = set(SECTIONS) - {"结论摘要", "研究任务", "数据覆盖", "原始作品明细", "局限与置信度"}
 EVIDENCE_CLASSES = {"observed", "calculated", "interpreted", "hypothesis"}
 
 
@@ -44,6 +45,7 @@ class ResearchReport:
     findings: list[Finding] = field(default_factory=list)
     task: str = "未提供"
     coverage: str = "未提供"
+    post_details: list[str] = field(default_factory=list)
     limitations: list[str] = field(default_factory=list)
     confidence: str = "未评估"
     confidence_note: str = ""
@@ -78,6 +80,8 @@ def render_report(report: ResearchReport) -> str:
             content = _escape(report.task)
         elif section == "数据覆盖":
             content = _escape(report.coverage)
+        elif section == "原始作品明细":
+            content = "\n".join(f"- {_escape(item)}" for item in report.post_details) or "- 本次报告未包含作品级明细。"
         elif section == "局限与置信度":
             limitations = [f"- {_escape(item)}" for item in report.limitations] or ["- 本次研究边界已在数据覆盖中说明。"]
             validations = report.validation_steps or _default_validation_steps(report.confidence)
@@ -104,6 +108,7 @@ def _from_dict(data: dict[str, Any]) -> ResearchReport:
         findings=findings,
         task=data.get("task", "未提供"),
         coverage=data.get("coverage", "未提供"),
+        post_details=data.get("post_details", []),
         limitations=data.get("limitations", []),
         confidence=data.get("confidence", "未评估"),
         confidence_note=data.get("confidence_note", ""),

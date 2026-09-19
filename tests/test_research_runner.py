@@ -30,8 +30,8 @@ def test_plan_does_not_claim_exact_price():
 
 def test_keyword_slice_plan_matches_its_single_search_execution():
     plan = plan_request(ResearchRequest(mode="niche-discovery", platform="douyin", query="AI工具"))
-    assert plan.request_count == 1
-    assert plan.operations == ("search",)
+    assert plan.request_count == 4
+    assert plan.operations == ("search", "statistics")
 
 
 class FakeAdapter:
@@ -84,8 +84,12 @@ def test_execute_keyword_mode_writes_evidence_and_report(tmp_path):
     assert result.raw_paths
     assert result.normalized_path.is_file()
     assert result.manifest_path.is_file()
-    assert '"request_count": 1' in result.manifest_path.read_text()
-    assert "evidence:" in result.report_path.read_text()
+    assert '"request_count": 2' in result.manifest_path.read_text()
+    report = result.report_path.read_text()
+    assert "原始作品明细" in report
+    assert "原始链接" in report
+    assert "播放" in report
+    assert "evidence:" in report
 
 
 def test_execute_viral_breakdown_requires_post_id_and_writes_comment_evidence(tmp_path):
@@ -96,6 +100,8 @@ def test_execute_viral_breakdown_requires_post_id_and_writes_comment_evidence(tm
     )
     assert result.report_path.is_file()
     assert "comment:c1" in result.report_path.read_text()
+    assert "评论需求" in result.report_path.read_text()
+    assert result.brief_path and result.brief_path.is_file()
 
 
 def test_entity_modes_require_entity_id():
