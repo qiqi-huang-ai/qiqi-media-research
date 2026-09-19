@@ -33,6 +33,7 @@ def test_get_post_maps_statistics_without_guessing():
     assert post.likes == 214000
     assert post.saves == 22100
     assert post.views == 3120000
+    assert post.views_source == "detail"
     assert client.calls[0][0] == "/api/v1/douyin/app/v3/fetch_one_video"
 
 
@@ -112,6 +113,7 @@ def test_detail_zero_play_count_is_missing_not_zero():
     payload = {"data": {"aweme_detail": {"aweme_id": "p1", "desc": "x", "statistics": {"play_count": 0}}}}
     post = DouyinAdapter(FakeClient(payload)).get_post(aweme_id="p1")
     assert post.views is None
+    assert post.views_source is None
 
 
 def test_search_accounts_maps_user_results():

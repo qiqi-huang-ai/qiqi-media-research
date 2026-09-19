@@ -1,3 +1,4 @@
+import json
 import pytest
 
 from scripts.research_runner import MODES, ResearchRequest, _filter_posts, execute_request, plan_request
@@ -25,6 +26,11 @@ def test_unknown_mode_is_rejected():
 def test_date_bounds_are_validated():
     with pytest.raises(ValueError, match="start_at must be earlier"):
         plan_request(ResearchRequest(mode="niche-discovery", platform="douyin", query="AI工具", start_at="2026-09-20T00:00:00+00:00", end_at="2026-09-19T00:00:00+00:00"))
+
+
+def test_strict_time_filter_rejects_unverified_platform_path():
+    with pytest.raises(ValueError, match="verified only for Douyin"):
+        plan_request(ResearchRequest(mode="niche-discovery", platform="xiaohongshu", query="AI工具", start_at="2026-09-12T00:00:00+08:00"))
 
 
 def test_search_results_are_filtered_by_published_at():
@@ -100,6 +106,12 @@ def test_execute_keyword_mode_writes_evidence_and_report(tmp_path):
     assert result.raw_paths
     assert result.normalized_path.is_file()
     assert result.manifest_path.is_file()
+    assert result.audit_path and result.audit_path.is_file()
+    quality = json.loads((tmp_path / "analysis/data-quality.json").read_text())
+    assert quality["missing_by_field"]["views"] == 0
+    normalized = json.loads(result.normalized_path.read_text().splitlines()[0])
+    assert normalized["views"] == 1000
+    assert normalized["views_source"] == "statistics"
     assert '"request_count": 2' in result.manifest_path.read_text()
     report = result.report_path.read_text()
     assert "原始作品明细" in report

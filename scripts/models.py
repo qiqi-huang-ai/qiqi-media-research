@@ -28,6 +28,7 @@ class Post:
     text: str | None = None
     published_at: str | None = None
     views: int | None = None
+    views_source: str | None = None
     likes: int | None = None
     comments: int | None = None
     shares: int | None = None

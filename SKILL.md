@@ -30,6 +30,9 @@ description: 使用 TikHub REST API 研究公开社媒数据，完成赛道、�
 11. 对“热门原因、用户痛点、开头钩子、内容结构”逐项区分数据事实、样本推断和待验证假设。没有逐字稿或视频画面时，只能说“基于标题/文案的初步判断”，不能冒充已完成视频拆解。
 12. 搜索结果必须按 `published_at` 做本地时间过滤；用户给出“最近 N 天”时，先换算成明确的带时区 `start_at/end_at`，并在 `brief.json` 和报告中记录原始样本、过滤后样本及时间边界。
 13. 每次执行都写出 `brief.json` 和 `analysis/data-quality.json`。质量检查发现身份字段缺失、指标缺失或重复作品时，要降低结论层级并在报告中说明，不得用占位数字补齐。
+14. 交付前读取 `analysis/delivery-audit.json`：`failed` 不得包装成成熟报告；`ready_with_caveats` 必须把具体缺口写入研究边界；只有 `ready` 才能声称数据链路验收通过。
+
+用户同时要求热门内容、用户痛点和选题时，不得只跑一次关键词搜索。组合执行：搜索与时间过滤 → 高表现及普通基线作品详情/统计 → 代表作品评论 → 评论聚合 → 选题。各阶段共享已有原始数据，避免重复调用。
 
 报告字段、作品明细和 PDF 单一来源规则见 [references/report-quality.md](references/report-quality.md)。
 

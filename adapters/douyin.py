@@ -145,6 +145,7 @@ def _post(item: dict[str, Any]) -> Post:
     stats = item.get("statistics") if isinstance(item.get("statistics"), dict) else {}
     post_id = str(item.get("aweme_id") or item.get("id") or "")
     duration_ms = _float(item.get("duration"))
+    views = _metric(stats.get("play_count"))
     return Post(
         platform="douyin",
         post_id=post_id,
@@ -153,7 +154,8 @@ def _post(item: dict[str, Any]) -> Post:
         author_name=_string(author.get("nickname")),
         text=_string(item.get("desc")),
         published_at=_timestamp(item.get("create_time")),
-        views=_metric(stats.get("play_count")),
+        views=views,
+        views_source="detail" if views is not None else None,
         likes=_int(stats.get("digg_count")),
         comments=_int(stats.get("comment_count")),
         shares=_int(stats.get("share_count")),

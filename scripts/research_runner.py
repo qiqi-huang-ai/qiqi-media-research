@@ -13,6 +13,7 @@ import argparse
 
 from scripts.analyze import compute_post_metrics, count_comment_signals
 from scripts.collect import CollectionPlan, cost_notice, estimate_requests, write_manifest
+from scripts.delivery_audit import audit_delivery, write_delivery_audit
 from scripts.normalize import write_normalized
 from scripts.raw_store import RawStore
 from scripts.quality import audit_posts, write_quality
@@ -65,6 +66,7 @@ class ResearchExecution:
     report_path: Path
     manifest_path: Path | None = None
     brief_path: Path | None = None
+    audit_path: Path | None = None
 
 
 _MODE_OPERATIONS: dict[str, tuple[str, ...]] = {
@@ -122,7 +124,7 @@ def _post_detail_lines(posts: list[Any], metrics: list[Any]) -> list[str]:
         lines.extend([
             f"{index}. 标题：{_headline(post.text)}",
             f"作者：{post.author_name or '未提供'}；发布时间：{post.published_at or '未提供'}；视频时长：{post.duration_sec or '未提供'} 秒",
-            f"可见数据：{'；'.join(values)}；互动率：{rate}",
+            f"可见数据：{'；'.join(values)}；互动率：{rate}；播放量来源：{post.views_source or '未返回'}",
             f"开头钩子判断：{hook}；内容结构判断：{structure}",
             f"原始链接：{post.source_url}",
         ])
@@ -207,6 +209,10 @@ def plan_request(request: ResearchRequest) -> ResearchPlan:
         raise ValueError("start_at must be earlier than end_at")
 
     operations = _MODE_OPERATIONS[request.mode]
+    if (request.start_at or request.end_at) and "search" not in operations:
+        raise ValueError("time bounds are currently supported only for search-based modes")
+    if (request.start_at or request.end_at) and (request.platform != "douyin" or request.secondary_platform is not None):
+        raise ValueError("strict time filtering is currently verified only for Douyin search")
     plan = CollectionPlan(
         search_pages=request.sample_pages * 2 if request.mode == "cross-platform" else (request.sample_pages if "search" in operations else 0),
         accounts=1 if any(item in operations for item in ("account", "account_search")) else 0,
@@ -217,7 +223,7 @@ def plan_request(request: ResearchRequest) -> ResearchPlan:
         # The statistics endpoint accepts at most two IDs. Hydrate the first
         # six search results (three calls) so visible ranking claims use real
         # play counts without turning a default run into an unbounded crawl.
-        statistics=(1 if "post_detail" in operations else (6 if request.mode == "cross-platform" else 3)) if "statistics" in operations and request.platform == "douyin" else 0,
+        statistics=(1 if "post_detail" in operations else 3) if "statistics" in operations and request.platform == "douyin" else 0,
     )
     # A comment operation defaults to one low-cost page when explicitly requested.
     if "comments" in operations and plan.comment_pages == 0:
@@ -296,7 +302,8 @@ def execute_request(request: ResearchRequest, *, adapter: Any, output_root: str 
         "planned_requests": result.plan.request_count,
         "actual_requests": len(result.raw_paths),
     }, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    return replace(result, manifest_path=manifest, brief_path=brief)
+    audit_path = write_delivery_audit(output_root, audit_delivery(output_root, result.report_path))
+    return replace(result, manifest_path=manifest, brief_path=brief, audit_path=audit_path)
 
 
 def _execute_keyword_mode(request: ResearchRequest, plan: ResearchPlan, adapter: Any, output_root: str | Path) -> ResearchExecution:
@@ -304,6 +311,7 @@ def _execute_keyword_mode(request: ResearchRequest, plan: ResearchPlan, adapter:
     store = RawStore(root)
     posts, raw_paths = _search_posts(request, adapter, store)
     raw_paths += _hydrate_statistics(posts, adapter, store, request.platform)
+    write_quality(root, audit_posts(posts))
     normalized = write_normalized(root, "posts", posts)
     metrics = compute_post_metrics(posts)
     quality = audit_posts(posts)
@@ -339,7 +347,6 @@ def _execute_post_mode(request: ResearchRequest, plan: ResearchPlan, adapter: An
         comments_page = adapter.get_comments(note_id=request.entity_id) if "comments" in plan.operations else None
     post_raw = store.save(request.platform, "post-detail", _adapter_last_raw(adapter, "post detail"))
     comments = comments_page.items if comments_page else []
-    write_quality(root, audit_posts([post]))
     raw_paths = [post_raw]
     if comments_page:
         comments_raw = store.save(request.platform, "comments", comments_page.raw)
@@ -351,8 +358,11 @@ def _execute_post_mode(request: ResearchRequest, plan: ResearchPlan, adapter: An
             value = values.get(metric)
             if value is not None:
                 setattr(post, field, value)
+                if field == "views":
+                    post.views_source = "statistics"
         stats_raw = store.save(request.platform, "statistics", getattr(adapter, "last_statistics_raw", {}))
         raw_paths.append(stats_raw)
+    write_quality(root, audit_posts([post]))
     post.raw_path = str(post_raw)
     normalized = write_normalized(root, "posts", [post])
     metrics = compute_post_metrics([post])[0]
@@ -492,6 +502,7 @@ def _execute_specialized_keyword_mode(request: ResearchRequest, plan: ResearchPl
     store = RawStore(root)
     posts, raw_paths = _search_posts(request, adapter, store)
     raw_paths += _hydrate_statistics(posts, adapter, store, request.platform)
+    write_quality(root, audit_posts(posts))
     normalized = write_normalized(root, "posts", posts)
     metrics = compute_post_metrics(posts)
     quality = audit_posts(posts)
@@ -534,7 +545,6 @@ def _search_posts(request: ResearchRequest, adapter: Any, store: RawStore) -> tu
             break
         cursor = page.next_cursor
     filtered = _filter_posts(posts, request.start_at, request.end_at)
-    write_quality(store.root, audit_posts(filtered))
     filter_report = store.root / "analysis" / "search-filter.json"
     filter_report.parent.mkdir(parents=True, exist_ok=True)
     filter_report.write_text(json.dumps({
@@ -591,6 +601,8 @@ def _hydrate_statistics(posts: list[Any], adapter: Any, store: RawStore, platfor
             for field, key in mapping.items():
                 if values.get(key) is not None:
                     setattr(post, field, values[key])
+                    if field == "views":
+                        post.views_source = "statistics"
         raw_paths.append(store.save(platform, "statistics", getattr(adapter, "last_statistics_raw", {})))
     return raw_paths
 
@@ -630,6 +642,12 @@ def main() -> int:
     secondary_adapter = make_adapter(args.secondary_platform) if args.secondary_platform else None
     result = execute_request(request, adapter=adapter, secondary_adapter=secondary_adapter, output_root=args.out)
     print(f"报告已生成：{result.report_path}")
+    if result.audit_path:
+        audit = json.loads(result.audit_path.read_text(encoding="utf-8"))
+        print(f"交付验收：{audit['status']}（{result.audit_path}）")
+        if audit["status"] == "failed":
+            print("数据链路未通过强制验收；报告仅供排查，不得作为成熟交付。")
+            return 2
     return 0
 
 

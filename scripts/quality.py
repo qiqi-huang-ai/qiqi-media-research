@@ -1,6 +1,7 @@
 """Field-level data quality checks for normalized public post records."""
 
 from dataclasses import asdict, dataclass
+from collections import Counter
 import json
 from pathlib import Path
 from typing import Iterable
@@ -40,7 +41,7 @@ def audit_posts(posts: Iterable[object]) -> PostQuality:
             complete += 1
     metric_slots = len(records) * len(METRIC_FIELDS)
     missing_metric_ratio = (sum(missing[field] for field in METRIC_FIELDS) / metric_slots) if metric_slots else 1.0
-    duplicates = len(ids) - len({item for item in ids if item})
+    duplicates = sum(count - 1 for item, count in Counter(ids).items() if item and count > 1)
     return PostQuality(len(records), complete, missing, round(missing_metric_ratio, 4), duplicates)
 
 

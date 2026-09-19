@@ -20,6 +20,7 @@
 | platform, post_id, source_url | string | 否 | 平台、作品 ID、证据链接 |
 | author_id, author_name, text, published_at | string | 是 | 作者与作品元数据 |
 | views, likes, comments, shares, saves, followers | integer | 是 | 平台明确返回的独立指标 |
+| views_source | string | 是 | 播放量来源，如 `detail` 或抖音独立 `statistics` 端点 |
 | duration_sec | number | 是 | 视频时长（秒） |
 | collected_at, raw_path | string | 是 | 采集时间与原始响应路径 |
 
