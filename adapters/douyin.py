@@ -239,6 +239,25 @@ class DouyinAdapter:
         items = [self._comment(item, aweme_id) for item in _list(body, "comments")]
         return Page(items, _cursor(body), _has_more(body), raw)
 
+    def get_video_statistics(self, aweme_ids: list[str]) -> dict[str, dict[str, int | None]]:
+        if not aweme_ids or len(aweme_ids) > 2:
+            raise ValueError("get_video_statistics accepts one or two aweme ids")
+        raw = self.client.get(VIDEO_STATS, {"aweme_ids": ",".join(aweme_ids)}).data
+        self.last_statistics_raw = raw
+        body = raw.get("data") if isinstance(raw.get("data"), dict) else raw
+        records = body.get("statistics_list", []) if isinstance(body, dict) else []
+        result: dict[str, dict[str, int | None]] = {}
+        for item in records:
+            if not isinstance(item, dict):
+                continue
+            post_id = str(item.get("aweme_id") or item.get("item_id") or "")
+            if post_id:
+                result[post_id] = {
+                    key: _int(item.get(key))
+                    for key in ("play_count", "digg_count", "comment_count", "share_count", "collect_count")
+                }
+        return result
+
     def get_trends(self) -> Page[TrendItem]:
         raw = self.client.get(HOT_SEARCH, {}).data
         body = _body(raw)

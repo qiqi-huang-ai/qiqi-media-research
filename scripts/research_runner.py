@@ -66,8 +66,8 @@ _MODE_OPERATIONS: dict[str, tuple[str, ...]] = {
     "trend-scan": ("trends",),
     "competitor-discovery": ("account_search",),
     "account-audit": ("account", "account_posts"),
-    "viral-breakdown": ("post_detail", "comments"),
-    "comment-mining": ("post_detail", "comments"),
+    "viral-breakdown": ("post_detail", "statistics", "comments"),
+    "comment-mining": ("post_detail", "statistics", "comments"),
     "content-gap": ("search",),
     "cross-platform": ("search",),
     "brand-product": ("search",),
@@ -101,6 +101,7 @@ def plan_request(request: ResearchRequest) -> ResearchPlan:
         post_details=1 if "post_detail" in operations else 0,
         comment_pages=request.comment_pages if "comments" in operations else 0,
         trend_pages=1 if "trends" in operations else 0,
+        statistics=1 if "statistics" in operations else 0,
     )
     # A comment operation defaults to one low-cost page when explicitly requested.
     if "comments" in operations and plan.comment_pages == 0:
@@ -111,6 +112,7 @@ def plan_request(request: ResearchRequest) -> ResearchPlan:
             post_details=plan.post_details,
             comment_pages=1,
             trend_pages=plan.trend_pages,
+            statistics=plan.statistics,
         )
     count = estimate_requests(plan)
     return ResearchPlan(request.mode, request.platform, operations, count, cost_notice(request.platform, plan))
@@ -194,9 +196,11 @@ def _execute_post_mode(request: ResearchRequest, plan: ResearchPlan, adapter: An
     store = RawStore(root)
     if request.platform == "douyin":
         post = adapter.get_post(aweme_id=request.entity_id)
+        statistics = adapter.get_video_statistics([post.post_id]) if "statistics" in plan.operations else {}
         comments_page = adapter.get_comments(request.entity_id) if "comments" in plan.operations else None
     else:
         post = adapter.get_post(note_id=request.entity_id)
+        statistics = {}
         comments_page = adapter.get_comments(note_id=request.entity_id) if "comments" in plan.operations else None
     post_raw = store.save(request.platform, "post-detail", _adapter_last_raw(adapter, "post detail"))
     comments = comments_page.items if comments_page else []
@@ -204,6 +208,15 @@ def _execute_post_mode(request: ResearchRequest, plan: ResearchPlan, adapter: An
     if comments_page:
         comments_raw = store.save(request.platform, "comments", comments_page.raw)
         raw_paths.append(comments_raw)
+    if statistics:
+        values = statistics.get(post.post_id, {})
+        for field in ("views", "likes", "comments", "shares", "saves"):
+            metric = {"views": "play_count", "likes": "digg_count", "comments": "comment_count", "shares": "share_count", "saves": "collect_count"}[field]
+            value = values.get(metric)
+            if value is not None:
+                setattr(post, field, value)
+        stats_raw = store.save(request.platform, "statistics", getattr(adapter, "last_statistics_raw", {}))
+        raw_paths.append(stats_raw)
     post.raw_path = str(post_raw)
     normalized = write_normalized(root, "posts", [post])
     metrics = compute_post_metrics([post])[0]

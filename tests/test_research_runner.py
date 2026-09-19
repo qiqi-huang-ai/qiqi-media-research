@@ -51,6 +51,10 @@ class FakeAdapter:
         from scripts.models import Comment
         return Page([Comment(platform="douyin", comment_id="c1", post_id=aweme_id, source_url="https://example/p1", text="多少钱")], None, False, {"comments": ["fixture"]})
 
+    def get_video_statistics(self, aweme_ids):
+        self.last_statistics_raw = {"data": {"statistics_list": [{"aweme_id": aweme_ids[0], "play_count": 1000}]}}
+        return {aweme_ids[0]: {"play_count": 1000}}
+
     def get_account(self, sec_user_id):
         from scripts.models import Account
         self.last_raw = {"account": ["fixture"]}
@@ -101,8 +105,8 @@ def test_entity_modes_require_entity_id():
 
 def test_comment_mining_plan_includes_detail_and_comments():
     plan = plan_request(ResearchRequest(mode="comment-mining", platform="douyin", query="评论", entity_id="p1"))
-    assert plan.request_count == 2
-    assert plan.operations == ("post_detail", "comments")
+    assert plan.request_count == 3
+    assert plan.operations == ("post_detail", "statistics", "comments")
 
 
 def test_xiaohongshu_trend_scan_is_rejected_before_execution():

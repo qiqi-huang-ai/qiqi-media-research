@@ -22,6 +22,8 @@
 
 抖音 Search 单独计费，任何研究预算和调用前成本估算都必须单列搜索调用，不得把它视为 App V3 的免费附带能力。
 
+抖音多数作品接口不再可靠返回播放量。需要播放量时，必须额外调用作品统计端点，参数为 `aweme_ids`（一次最多两个），读取 `data.statistics_list[].play_count`；不能把详情接口中的 `play_count: 0` 当成真实零播放。
+
 官方资料：
 
 - https://tikhub.io/douyin-api

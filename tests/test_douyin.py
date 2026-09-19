@@ -99,6 +99,15 @@ def test_search_pagination_preserves_tikhub_search_state():
     assert params["backtrace"] == "request-1"
 
 
+def test_video_statistics_uses_aweme_ids_and_maps_play_count():
+    payload = {"data": {"statistics_list": [{"aweme_id": "p1", "play_count": 585552, "digg_count": 10}]}}
+    client = FakeClient(payload)
+    stats = DouyinAdapter(client).get_video_statistics(["p1"])
+    assert stats["p1"]["play_count"] == 585552
+    assert client.calls[0][0] == "/api/v1/douyin/app/v3/fetch_video_statistics"
+    assert client.calls[0][1] == {"aweme_ids": "p1"}
+
+
 def test_search_accounts_maps_user_results():
     payload = {"data": {"user_list": [{"user_info": {"uid": "u1", "sec_uid": "sec-1", "nickname": "Creator", "follower_count": 1000}}], "cursor": 20, "has_more": 1}}
     page = DouyinAdapter(FakeClient(payload)).search_accounts("AI")

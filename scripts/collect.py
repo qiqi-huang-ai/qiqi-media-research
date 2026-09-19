@@ -19,6 +19,7 @@ class CollectionPlan:
     post_details: int = 0
     comment_pages: int = 0
     trend_pages: int = 0
+    statistics: int = 0
 
 
 def estimate_requests(plan: CollectionPlan) -> int:
@@ -32,6 +33,7 @@ def estimate_requests(plan: CollectionPlan) -> int:
         + plan.post_details
         + plan.comment_pages
         + plan.trend_pages
+        + plan.statistics
     )
 
 
@@ -56,6 +58,8 @@ def cost_notice(platform: str, plan: CollectionPlan) -> str:
         families.append(f"comments={plan.comment_pages}")
     if plan.trend_pages:
         families.append(f"trends={plan.trend_pages}")
+    if plan.statistics:
+        families.append(f"statistics={plan.statistics}")
     suffix = "；抖音 Search 单独计费" if platform == "douyin" and plan.search_pages else ""
     return f"计划调用 {total} 次（{', '.join(families) or '无调用'}）{suffix}。实际单价请以 TikHub 当前页面为准。"
 

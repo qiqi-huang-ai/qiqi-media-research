@@ -5,12 +5,22 @@ from __future__ import annotations
 import argparse
 from dataclasses import dataclass
 from pathlib import Path
+import re
 
 
 @dataclass(frozen=True, slots=True)
 class ReportSection:
     title: str
     lines: tuple[str, ...]
+
+
+_INTERNAL_EVIDENCE = re.compile(r"\s*`?\[(?:observed|calculated|interpreted|hypothesis)\]`?\s*（?evidence:.*?\）?$")
+_INTERNAL_IDS = re.compile(r"\s*与?\s*evidence\s*ID\s*[:：].*$", re.IGNORECASE)
+
+
+def _display_line(line: str) -> str:
+    """Keep the PDF reader-facing text free of internal evidence annotations."""
+    return _INTERNAL_IDS.sub("", _INTERNAL_EVIDENCE.sub("", line)).rstrip("` ")
 
 
 def parse_markdown(source: str) -> tuple[str, tuple[ReportSection, ...]]:
@@ -28,7 +38,7 @@ def parse_markdown(source: str) -> tuple[str, tuple[ReportSection, ...]]:
             current_title = line[3:].strip()
             current_lines = []
         elif line:
-            current_lines.append(line.removeprefix("- "))
+            current_lines.append(_display_line(line.removeprefix("- ")))
     if current_title is not None:
         sections.append(ReportSection(current_title, tuple(current_lines)))
     return title, tuple(sections)
@@ -62,10 +72,10 @@ def render_pdf(input_path: Path, output_path: Path, *, period: str = "", source_
     bullet = ParagraphStyle("bullet", parent=body, leftIndent=10, firstLineIndent=-8, spaceAfter=4)
     caption = ParagraphStyle("caption", parent=styles["Normal"], fontName="QiqiSans", fontSize=8, leading=12, textColor=slate)
 
-    evidence_lines = sum(1 for item in sections for line in item.lines if "evidence:" in line)
+    evidence_lines = sum(1 for item in sections for line in item.lines if line)
     cards = [
         ("研究章节", str(len(sections)), cyan),
-        ("证据引用", str(evidence_lines), lime),
+        ("研究要点", str(evidence_lines), lime),
         ("信息源", str(source_count) if source_count else "已记录", coral),
     ]
     story = []
