@@ -73,6 +73,32 @@ def test_search_maps_live_business_data_shape():
     assert page.items[0].post_id == "7350810998023949599"
 
 
+def test_search_pagination_preserves_tikhub_search_state():
+    payload = {
+        "data": {
+            "business_data": [],
+            "business_config": {
+                "has_more": 1,
+                "next_page": {
+                    "cursor": 20,
+                    "keyword": "WorkBuddy 教程",
+                    "search_id": "search-1",
+                    "search_request_id": "request-1",
+                },
+            },
+        },
+    }
+    client = FakeClient(payload)
+    adapter = DouyinAdapter(client)
+    first = adapter.search_posts("WorkBuddy 教程")
+    adapter.search_posts("ignored", cursor=first.next_cursor)
+    _, params = client.calls[1]
+    assert params["cursor"] == 20
+    assert params["keyword"] == "WorkBuddy 教程"
+    assert params["search_id"] == "search-1"
+    assert params["backtrace"] == "request-1"
+
+
 def test_search_accounts_maps_user_results():
     payload = {"data": {"user_list": [{"user_info": {"uid": "u1", "sec_uid": "sec-1", "nickname": "Creator", "follower_count": 1000}}], "cursor": 20, "has_more": 1}}
     page = DouyinAdapter(FakeClient(payload)).search_accounts("AI")

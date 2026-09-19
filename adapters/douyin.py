@@ -1,6 +1,7 @@
 """TikHub Douyin App V3 and Search API adapter."""
 
 from datetime import UTC, datetime
+import json
 from typing import Any, Iterable
 
 from adapters.base import Page
@@ -97,6 +98,31 @@ def _cursor(body: dict[str, Any]) -> str | None:
     return None
 
 
+def _search_cursor(body: dict[str, Any]) -> str | None:
+    config = body.get("business_config")
+    next_page = config.get("next_page") if isinstance(config, dict) else None
+    if not isinstance(next_page, dict) or next_page.get("cursor") is None:
+        return _cursor(body)
+    state = {
+        key: next_page[key]
+        for key in ("cursor", "keyword", "search_id", "search_request_id")
+        if next_page.get(key) is not None
+    }
+    return json.dumps(state, ensure_ascii=False, separators=(",", ":"))
+
+
+def _search_state(cursor: str) -> dict[str, Any]:
+    if cursor == "0":
+        return {"cursor": 0}
+    try:
+        state = json.loads(cursor)
+    except json.JSONDecodeError as error:
+        raise ValueError("invalid Douyin search cursor") from error
+    if not isinstance(state, dict) or not isinstance(state.get("cursor"), int):
+        raise ValueError("invalid Douyin search cursor")
+    return state
+
+
 def _has_more(body: dict[str, Any]) -> bool:
     value = body.get("has_more")
     if value is None and isinstance(body.get("data"), dict):
@@ -142,13 +168,16 @@ class DouyinAdapter:
         self.last_raw: dict[str, Any] | None = None
 
     def search_posts(self, keyword: str, *, cursor: str = "0") -> Page[Post]:
+        state = _search_state(cursor)
         raw = self.client.post(VIDEO_SEARCH, {
-            "keyword": keyword, "cursor": int(cursor), "sort_type": "0",
+            "keyword": str(state.get("keyword") or keyword),
+            "cursor": state["cursor"], "sort_type": "0",
             "publish_time": "0", "filter_duration": "0", "content_type": "0",
-            "search_id": "", "backtrace": "",
+            "search_id": str(state.get("search_id") or ""),
+            "backtrace": str(state.get("search_request_id") or ""),
         }).data
         body = _body(raw)
-        return Page([_post(x) for x in _list(body, "aweme_list")], _cursor(body), _has_more(body), raw)
+        return Page([_post(x) for x in _list(body, "aweme_list")], _search_cursor(body), _has_more(body), raw)
 
     def search_accounts(self, keyword: str, *, cursor: str = "0") -> Page[Account]:
         raw = self.client.post(USER_SEARCH, {"keyword": keyword, "cursor": int(cursor)}).data
