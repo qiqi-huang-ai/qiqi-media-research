@@ -18,7 +18,7 @@ description: 使用 TikHub REST API 研究公开社媒数据，完成赛道、�
 ## 执行流程
 
 1. 用 `templates/research-brief.md` 明确研究问题、平台、时间窗、最小样本和排除项。
-2. 运行 `python -m scripts.doctor`。缺少 `TIKHUB_API_KEY` 时停止；不得请求、显示、保存或记录密钥。
+2. 运行 `python3 -m scripts.doctor`。缺少 `TIKHUB_API_KEY` 时停止；不得请求、显示、保存或记录密钥。
 3. 读取 `references/platform-capabilities.md`，只使用当前平台可用的能力。
 4. 用 `scripts.collect.CollectionPlan` 估算调用次数并说明端点族。默认先取 1–3 个样本；超过 20 次调用须先取得用户明确同意。
 5. 遇到 `401/403` 停止并提示检查权限；遇到 `402` 停止并提示额度或计费问题，不自动重试付费失败。

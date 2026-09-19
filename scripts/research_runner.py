@@ -61,17 +61,17 @@ class ResearchExecution:
 
 
 _MODE_OPERATIONS: dict[str, tuple[str, ...]] = {
-    "niche-discovery": ("search", "post_detail", "comments"),
-    "trend-scan": ("trends", "search"),
-    "competitor-discovery": ("account_search", "account", "account_posts"),
-    "account-audit": ("account", "account_posts", "post_detail"),
+    "niche-discovery": ("search",),
+    "trend-scan": ("trends",),
+    "competitor-discovery": ("account_search",),
+    "account-audit": ("account", "account_posts"),
     "viral-breakdown": ("post_detail", "comments"),
     "comment-mining": ("comments",),
-    "content-gap": ("search", "account_posts", "comments"),
-    "cross-platform": ("search", "post_detail"),
-    "brand-product": ("search", "comments", "account"),
-    "idea-generation": ("search", "comments", "post_detail"),
-    "market-map": ("search", "account_search", "account_posts"),
+    "content-gap": ("search",),
+    "cross-platform": ("search",),
+    "brand-product": ("search",),
+    "idea-generation": ("search",),
+    "market-map": ("search",),
 }
 
 
@@ -92,7 +92,7 @@ def plan_request(request: ResearchRequest) -> ResearchPlan:
 
     operations = _MODE_OPERATIONS[request.mode]
     plan = CollectionPlan(
-        search_pages=request.sample_pages if "search" in operations else 0,
+        search_pages=request.sample_pages * 2 if request.mode == "cross-platform" else (request.sample_pages if "search" in operations else 0),
         accounts=1 if any(item in operations for item in ("account", "account_search")) else 0,
         posts_per_account_pages=1 if "account_posts" in operations else 0,
         post_details=1 if "post_detail" in operations else 0,

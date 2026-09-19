@@ -28,6 +28,12 @@ def test_plan_does_not_claim_exact_price():
     assert "调用" in plan.cost_notice
 
 
+def test_keyword_slice_plan_matches_its_single_search_execution():
+    plan = plan_request(ResearchRequest(mode="niche-discovery", platform="douyin", query="AI工具"))
+    assert plan.request_count == 1
+    assert plan.operations == ("search",)
+
+
 class FakeAdapter:
     def search_posts(self, keyword, **kwargs):
         from adapters.base import Page

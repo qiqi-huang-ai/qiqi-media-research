@@ -13,7 +13,7 @@
 - Cursor：保留 `.cursor/rules/qiqi-media-research.mdc`。
 - WorkBuddy：使用 `workbuddy/SKILL.md` 作为入口。
 
-运行环境只需要 Python 3.11+ 标准库。开发测试可执行 `python -m pip install -e '.[dev]'`。
+运行环境只需要 Python 3.11+ 标准库。开发测试可执行 `python3 -m pip install -e '.[dev]'`。
 
 ## 配置 TIKHUB_API_KEY
 
@@ -28,7 +28,7 @@ export TIKHUB_API_KEY="你的本地Key"
 ## 运行诊断
 
 ```bash
-python -m scripts.doctor
+python3 -m scripts.doctor
 ```
 
 诊断不会请求 TikHub 或产生费用，只显示 Key 是 `configured` 还是 `missing`。
@@ -56,8 +56,8 @@ TikHub 的额度、价格和接口状态可能变化，本项目不提供免费�
 ## 测试与贡献
 
 ```bash
-python -m pytest -v
-python -m compileall -q adapters scripts
+python3 -m pytest -v
+python3 -m compileall -q adapters scripts
 ```
 
 不得提交真实 Key、真实个人数据、缓存文件，或删除证据链和调用成本提醒。
