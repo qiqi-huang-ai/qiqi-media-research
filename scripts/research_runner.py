@@ -182,7 +182,7 @@ def _execute_keyword_mode(request: ResearchRequest, plan: ResearchPlan, adapter:
             evidence_ids=[f"post:{post.post_id}" for post in posts[:3]],
             evidence_class="calculated",
         )] if posts else [],
-        limitations=["仅执行关键词搜索切片，未自动扩展账号、评论或详情调用。"],
+        limitations=["本次结论聚焦关键词搜索样本，用于近期方向筛选；不外推为平台全量趋势或账号长期表现。"],
         confidence="low" if len(posts) < 10 else "medium",
     )
     report_path = root / "reports" / f"{request.mode}-{request.platform}.md"
@@ -230,7 +230,7 @@ def _execute_post_mode(request: ResearchRequest, plan: ResearchPlan, adapter: An
         task=f"研究模式：{request.mode}；作品：{request.entity_id}",
         coverage=f"1 条作品、{len(comments)} 条评论。",
         findings=[Finding(text=finding_text, evidence_ids=evidence, evidence_class="calculated")],
-        limitations=["仅执行单作品切片，未扩展账号或跨平台样本。"],
+        limitations=["本次结论聚焦单条公开作品，用于内容拆解；不外推为该账号整体表现或同类作品的普遍规律。"],
         confidence="low",
     )
     report_path = root / "reports" / f"{request.mode}-{request.platform}.md"
@@ -265,7 +265,7 @@ def _execute_account_mode(request: ResearchRequest, plan: ResearchPlan, adapter:
             evidence_ids=[f"account:{account.account_id}"] + [f"post:{post.post_id}" for post in posts[:3]],
             evidence_class="calculated",
         )],
-        limitations=["仅采集一页账号作品，不代表账号全量表现。"],
+        limitations=["本次使用账号资料和一页公开作品样本，用于识别内容结构；不外推为账号全量或长期表现。"],
         confidence="low" if len(posts) < 10 else "medium",
     )
     report_path = root / "reports" / f"account-audit-{request.platform}.md"
@@ -290,7 +290,7 @@ def _execute_cross_platform(request: ResearchRequest, plan: ResearchPlan, adapte
         task=f"研究模式：cross-platform；平台：{request.platform}、{request.secondary_platform}",
         coverage=f"{request.platform} {len(first_posts)} 条；{request.secondary_platform} {len(second_posts)} 条。",
         findings=[Finding(text=f"两个平台共获得 {len(metrics)} 条可分析作品，指标仍按平台分别计算。", evidence_ids=evidence, evidence_class="calculated")],
-        limitations=["仅比较一页样本，不直接比较平台原始热度分。"],
+        limitations=["本次比较同一关键词的一页平台内样本；只观察结构和平台内相对表现，不直接比较平台原始热度分。"],
         confidence="low",
     )
     report_path = root / "reports" / "cross-platform.md"
@@ -312,7 +312,7 @@ def _execute_trend_mode(request: ResearchRequest, plan: ResearchPlan, adapter: A
         task=f"研究模式：trend-scan；主题：{request.query}",
         coverage=f"{len(trends_page.items)} 条趋势项。",
         findings=[Finding(text=f"当前样本包含 {len(trends_page.items)} 条平台趋势项，需结合关键词搜索判断持续性。", evidence_ids=evidence or [f"raw:{raw_path.name}"], evidence_class="observed")],
-        limitations=["趋势接口样本是当前时点快照，不代表长期趋势。"],
+        limitations=["趋势数据是当前时点的公开快照，用于发现观察方向；持续性需要结合后续时间窗口复核。"],
         confidence="low",
     )
     report_path = root / "reports" / "trend-scan.md"
@@ -334,7 +334,7 @@ def _execute_competitor_mode(request: ResearchRequest, plan: ResearchPlan, adapt
         task=f"研究模式：competitor-discovery；关键词：{request.query}",
         coverage=f"{len(page.items)} 个候选账号。",
         findings=[Finding(text=f"发现 {len(page.items)} 个候选账号，需结合账号作品样本进一步筛选。", evidence_ids=evidence or [f"raw:{raw_path.name}"], evidence_class="observed")],
-        limitations=["候选发现不等于对标结论；本次未自动扩展每个账号的作品。"],
+        limitations=["候选账号用于建立观察名单；是否适合长期对标，需要结合账号作品样本和内容目标继续判断。"],
         confidence="low",
     )
     report_path = root / "reports" / "competitor-discovery.md"
@@ -363,7 +363,7 @@ def _execute_specialized_keyword_mode(request: ResearchRequest, plan: ResearchPl
         task=f"研究模式：{request.mode}；关键词：{request.query}",
         coverage=f"{len(posts)} 条搜索作品，{sum(metric.engagement_rate is not None for metric in metrics)} 条可计算互动率。",
         findings=[Finding(text=f"本次以 {analysis} 为分析框架，样本需继续扩展后再形成高置信结论。", evidence_ids=evidence, evidence_class="interpreted")],
-        limitations=["当前为一页搜索样本；没有把样本外信息写成结论。"],
+        limitations=["本次以一页关键词样本识别方向，不把样本外信息写成结论；建议用后续样本验证供需和选题持续性。"],
         confidence="low",
     )
     report_path = root / "reports" / f"{request.mode}-{request.platform}.md"

@@ -21,6 +21,8 @@ def test_report_contains_coverage_and_limitations():
     assert "数据覆盖" in text
     assert "局限与置信度" in text
     assert "comment:c1" in text
+    assert "研究边界：" in text
+    assert "下一步验证：" in text
 
 
 def test_user_pipes_are_escaped():

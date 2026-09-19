@@ -46,6 +46,8 @@ class ResearchReport:
     coverage: str = "未提供"
     limitations: list[str] = field(default_factory=list)
     confidence: str = "未评估"
+    confidence_note: str = ""
+    validation_steps: list[str] = field(default_factory=list)
 
 
 def _validate(report: ResearchReport) -> None:
@@ -77,8 +79,17 @@ def render_report(report: ResearchReport) -> str:
         elif section == "数据覆盖":
             content = _escape(report.coverage)
         elif section == "局限与置信度":
-            limitations = [f"- {_escape(item)}" for item in report.limitations]
-            content = "\n".join([f"置信度：{_escape(report.confidence)}", *limitations])
+            limitations = [f"- {_escape(item)}" for item in report.limitations] or ["- 本次研究边界已在数据覆盖中说明。"]
+            validations = report.validation_steps or _default_validation_steps(report.confidence)
+            validation_lines = [f"- {_escape(item)}" for item in validations]
+            content = "\n".join([
+                f"结论层级：{_escape(report.confidence)}",
+                f"结论说明：{_escape(report.confidence_note or _default_confidence_note(report.confidence))}",
+                "研究边界：",
+                *limitations,
+                "下一步验证：",
+                *validation_lines,
+            ])
         else:
             content = "\n".join(grouped[section]) or "- 本次研究未形成有充分证据的结论。"
         blocks.append(content)
@@ -95,7 +106,25 @@ def _from_dict(data: dict[str, Any]) -> ResearchReport:
         coverage=data.get("coverage", "未提供"),
         limitations=data.get("limitations", []),
         confidence=data.get("confidence", "未评估"),
+        confidence_note=data.get("confidence_note", ""),
+        validation_steps=data.get("validation_steps", []),
     )
+
+
+def _default_confidence_note(confidence: str) -> str:
+    return {
+        "high": "数据事实和指标来源清晰，可直接用于当前研究范围内的判断。",
+        "medium": "样本足以支持方向性判断，但仍应通过后续样本观察其持续性。",
+        "low": "本次结果用于探索方向和筛选选题，不外推为平台全量或长期结论。",
+    }.get(confidence, "结论强度以数据覆盖和证据类型为准。")
+
+
+def _default_validation_steps(confidence: str) -> list[str]:
+    return {
+        "high": ["定期复核关键指标，关注数据随时间变化。"],
+        "medium": ["扩大关键词和时间窗口，观察同类内容是否持续出现。"],
+        "low": ["补充样本、详情和评论，再决定是否升级为稳定结论。"],
+    }.get(confidence, ["根据新的公开样本继续复核。"])
 
 
 def main() -> int:

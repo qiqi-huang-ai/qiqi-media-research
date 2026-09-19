@@ -24,7 +24,7 @@ description: 使用 TikHub REST API 研究公开社媒数据，完成赛道、�
 5. 遇到 `401/403` 停止并提示检查权限；遇到 `402` 停止并提示额度或计费问题，不自动重试付费失败。
 6. 每次请求先以 `RawStore` 保存原始响应，再写入 `normalized/*.jsonl` 和不含凭证的 `manifest.json`。
 7. 先运行 `scripts.analyze` 与 `scripts.score` 的确定性计算，再进行语义解释。不得让语言模型改写原始数值。
-8. 用 `scripts.report` 输出报告。每条关键发现必须包含证据类别、evidence ID；同时写明覆盖范围、缺失字段、局限与置信度。
+8. 用 `scripts.report` 输出报告。每条关键发现必须包含内部证据类别和 evidence ID；面向用户的报告正文应将其转译为自然语言。局限部分使用“结论层级、研究边界、下一步验证”，不要写成缺陷清单。
 9. 研究正文完成后，必须额外生成可视化 PDF；按 [references/visual-pdf.md](references/visual-pdf.md) 渲染、检查后交付。PDF 只呈现已有证据，不得替代 Markdown 或制造结论。
 
 ## 数据规则
