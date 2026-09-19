@@ -33,6 +33,26 @@ python3 -m scripts.doctor
 
 诊断不会请求 TikHub 或产生费用，只显示 Key 是 `configured` 还是 `missing`。
 
+## 命令行运行
+
+每次运行先显示调用计划；默认只取 1 页。需要扩样本时显式传入 `--sample-pages 2` 或 `3`，调用上限仍受 20 次确认规则约束。
+
+```bash
+python3 -m scripts.research_runner \
+  --mode niche-discovery --platform douyin --query "AI 表格教程" \
+  --out research-output/ai-table
+```
+
+跨平台研究必须提供第二个平台：
+
+```bash
+python3 -m scripts.research_runner \
+  --mode cross-platform --platform douyin --secondary-platform xiaohongshu \
+  --query "AI 会议纪要" --sample-pages 1
+```
+
+小红书暂不支持 `trend-scan`；详情和评论研究需要提供对应平台的公开 `--entity-id`。
+
 ## 第一次低成本抖音示例
 
 > 研究抖音“AI 表格教程”。先做 1 页搜索和 1 条作品详情，告诉我预计调用次数后再开始。
@@ -47,7 +67,7 @@ python3 -m scripts.doctor
 
 ## 输出目录
 
-`research-output/raw/` 保存原始响应，`normalized/` 保存统一 JSONL，`manifest.json` 记录不含凭证的调用清单，Markdown 报告记录 evidence ID、覆盖范围和局限。
+`research-output/raw/` 保存原始响应，`normalized/` 保存统一 JSONL，`manifest.json` 记录实际调用清单（不含凭证），Markdown 报告记录 evidence ID、覆盖范围和局限。
 
 ## 成本与数据边界
 

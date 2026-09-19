@@ -43,7 +43,8 @@ class FakeAdapter:
     def get_post(self, **kwargs):
         from adapters.base import Page
         from scripts.models import Post
-        return Post(platform="douyin", post_id=kwargs["aweme_id"], source_url="https://example/p1", author_id="a", views=100, likes=10)
+        self.last_raw = {"detail": ["fixture"]}
+        return Post(platform="douyin", post_id=kwargs.get("aweme_id") or kwargs["note_id"], source_url="https://example/p1", author_id="a", views=100, likes=10)
 
     def get_comments(self, aweme_id, **kwargs):
         from adapters.base import Page
@@ -52,6 +53,7 @@ class FakeAdapter:
 
     def get_account(self, sec_user_id):
         from scripts.models import Account
+        self.last_raw = {"account": ["fixture"]}
         return Account(platform="douyin", account_id=sec_user_id, source_url="https://example/a", name="Test")
 
     def get_account_posts(self, sec_user_id, **kwargs):
@@ -77,6 +79,8 @@ def test_execute_keyword_mode_writes_evidence_and_report(tmp_path):
     assert result.report_path.is_file()
     assert result.raw_paths
     assert result.normalized_path.is_file()
+    assert result.manifest_path.is_file()
+    assert '"request_count": 1' in result.manifest_path.read_text()
     assert "evidence:" in result.report_path.read_text()
 
 
@@ -93,6 +97,17 @@ def test_execute_viral_breakdown_requires_post_id_and_writes_comment_evidence(tm
 def test_entity_modes_require_entity_id():
     with pytest.raises(ValueError, match="entity_id"):
         execute_request(ResearchRequest(mode="comment-mining", platform="douyin", query="评论"), adapter=FakeAdapter(), output_root="/tmp/x")
+
+
+def test_comment_mining_plan_includes_detail_and_comments():
+    plan = plan_request(ResearchRequest(mode="comment-mining", platform="douyin", query="评论", entity_id="p1"))
+    assert plan.request_count == 2
+    assert plan.operations == ("post_detail", "comments")
+
+
+def test_xiaohongshu_trend_scan_is_rejected_before_execution():
+    with pytest.raises(ValueError, match="only for douyin"):
+        plan_request(ResearchRequest(mode="trend-scan", platform="xiaohongshu", query="AI"))
 
 
 def test_execute_account_audit_requires_entity_id(tmp_path):
@@ -114,6 +129,20 @@ def test_execute_cross_platform_requires_and_combines_second_adapter(tmp_path):
     )
     assert result.report_path.is_file()
     assert "cross-platform" in result.report_path.read_text()
+
+
+def test_cross_platform_starts_xiaohongshu_with_an_empty_cursor(tmp_path):
+    class XiaohongshuFake(FakeAdapter):
+        def search_posts(self, keyword, *, cursor=None, **kwargs):
+            assert cursor is None
+            return super().search_posts(keyword, **kwargs)
+
+    execute_request(
+        ResearchRequest(mode="cross-platform", platform="douyin", secondary_platform="xiaohongshu", query="AI工具"),
+        adapter=FakeAdapter(),
+        secondary_adapter=XiaohongshuFake(),
+        output_root=tmp_path,
+    )
 
 
 def test_execute_trend_scan_writes_trend_evidence(tmp_path):

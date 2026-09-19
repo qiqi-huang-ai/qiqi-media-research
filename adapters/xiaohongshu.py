@@ -149,6 +149,7 @@ def _find_note(value: Any) -> dict[str, Any] | None:
 class XiaohongshuAdapter:
     def __init__(self, client: Any):
         self.client = client
+        self.last_raw: dict[str, Any] | None = None
 
     def search_posts(self, keyword: str, *, page: int = 1, cursor: str | None = None) -> Page[Post]:
         state = _decode(cursor)
@@ -174,6 +175,7 @@ class XiaohongshuAdapter:
         _one_of(user_id, share_text, "user_id or share_text")
         params = {"user_id": user_id} if user_id else {"share_text": share_text}
         raw = self.client.get(PROFILE, params).data
+        self.last_raw = raw
         body = _body(raw)
         return self._account(body.get("user_info") or body.get("user") or body)
 
@@ -188,6 +190,7 @@ class XiaohongshuAdapter:
         _one_of(note_id, share_text, "note_id or share_text")
         params = {"note_id": note_id} if note_id else {"share_text": share_text}
         raw = self.client.get(VIDEO_NOTE if video else IMAGE_NOTE, params).data
+        self.last_raw = raw
         body = _body(raw)
         note = _find_note(body)
         if not isinstance(note, dict):

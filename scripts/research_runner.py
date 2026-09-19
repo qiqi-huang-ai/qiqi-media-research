@@ -4,13 +4,13 @@ This module owns routing and planning. Platform adapters remain responsible for
 endpoint details; semantic interpretation remains evidence-bound report work.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 import argparse
 
 from scripts.analyze import compute_post_metrics
-from scripts.collect import CollectionPlan, cost_notice, estimate_requests
+from scripts.collect import CollectionPlan, cost_notice, estimate_requests, write_manifest
 from scripts.normalize import write_normalized
 from scripts.raw_store import RawStore
 from scripts.report import Finding, ResearchReport, render_report
@@ -58,6 +58,7 @@ class ResearchExecution:
     raw_paths: tuple[Path, ...]
     normalized_path: Path
     report_path: Path
+    manifest_path: Path | None = None
 
 
 _MODE_OPERATIONS: dict[str, tuple[str, ...]] = {
@@ -66,7 +67,7 @@ _MODE_OPERATIONS: dict[str, tuple[str, ...]] = {
     "competitor-discovery": ("account_search",),
     "account-audit": ("account", "account_posts"),
     "viral-breakdown": ("post_detail", "comments"),
-    "comment-mining": ("comments",),
+    "comment-mining": ("post_detail", "comments"),
     "content-gap": ("search",),
     "cross-platform": ("search",),
     "brand-product": ("search",),
@@ -80,6 +81,8 @@ def plan_request(request: ResearchRequest) -> ResearchPlan:
         raise ValueError(f"unsupported research mode: {request.mode}")
     if request.platform not in PLATFORMS:
         raise ValueError(f"unsupported platform: {request.platform}")
+    if request.mode == "trend-scan" and request.platform != "douyin":
+        raise ValueError("trend-scan is currently available only for douyin")
     if not request.query.strip():
         raise ValueError("query cannot be empty")
     if request.mode == "cross-platform":
@@ -124,38 +127,54 @@ def execute_request(request: ResearchRequest, *, adapter: Any, output_root: str 
     if request.mode in {"viral-breakdown", "comment-mining"}:
         if not request.entity_id:
             raise ValueError("entity_id is required for this research mode")
-        return _execute_post_mode(request, plan, adapter, output_root)
-    if request.mode == "account-audit":
+        result = _execute_post_mode(request, plan, adapter, output_root)
+    elif request.mode == "account-audit":
         if not request.entity_id:
             raise ValueError("entity_id is required for this research mode")
-        return _execute_account_mode(request, plan, adapter, output_root)
-    if request.mode == "cross-platform":
+        result = _execute_account_mode(request, plan, adapter, output_root)
+    elif request.mode == "cross-platform":
         if secondary_adapter is None:
             raise ValueError("cross-platform execution requires two adapters")
-        return _execute_cross_platform(request, plan, adapter, secondary_adapter, output_root)
-    if request.mode == "trend-scan":
-        return _execute_trend_mode(request, plan, adapter, output_root)
-    if request.mode == "competitor-discovery":
-        return _execute_competitor_mode(request, plan, adapter, output_root)
-    if request.mode in {"content-gap", "brand-product", "idea-generation", "market-map"}:
-        return _execute_specialized_keyword_mode(request, plan, adapter, output_root)
-    if "search" not in plan.operations:
+        result = _execute_cross_platform(request, plan, adapter, secondary_adapter, output_root)
+    elif request.mode == "trend-scan":
+        result = _execute_trend_mode(request, plan, adapter, output_root)
+    elif request.mode == "competitor-discovery":
+        result = _execute_competitor_mode(request, plan, adapter, output_root)
+    elif request.mode in {"content-gap", "brand-product", "idea-generation", "market-map"}:
+        result = _execute_specialized_keyword_mode(request, plan, adapter, output_root)
+    elif "search" in plan.operations:
+        result = _execute_keyword_mode(request, plan, adapter, output_root)
+    else:
         raise ValueError(f"mode {request.mode} requires an explicit entity and is not keyword-executable")
+    manifest = write_manifest(
+        output_root,
+        platform=request.platform,
+        operation=request.mode,
+        parameters={
+            "query": request.query,
+            "entity_id": request.entity_id,
+            "secondary_platform": request.secondary_platform,
+            "sample_pages": request.sample_pages,
+            "comment_pages": request.comment_pages,
+        },
+        request_count=len(result.raw_paths),
+        raw_paths=result.raw_paths,
+        failures=(),
+    )
+    return replace(result, manifest_path=manifest)
 
+
+def _execute_keyword_mode(request: ResearchRequest, plan: ResearchPlan, adapter: Any, output_root: str | Path) -> ResearchExecution:
     root = Path(output_root)
     store = RawStore(root)
-    page = adapter.search_posts(request.query, cursor="0")
-    raw_path = store.save(request.platform, "search", page.raw)
-    posts = list(page.items)
-    for post in posts:
-        post.raw_path = str(raw_path)
+    posts, raw_paths = _search_posts(request, adapter, store)
     normalized = write_normalized(root, "posts", posts)
     metrics = compute_post_metrics(posts)
     report = ResearchReport(
         title=f"{request.platform} {request.mode}",
-        summary=f"关键词“{request.query}”完成一页低成本样本研究。",
+        summary=f"关键词“{request.query}”完成低成本样本研究。",
         task=f"研究模式：{request.mode}；查询：{request.query}",
-        coverage=f"{len(posts)} 条作品，1 页搜索，原始证据已保存。",
+        coverage=f"{len(posts)} 条作品，最多 {request.sample_pages} 页搜索，原始证据已保存。",
         findings=[Finding(
             text=f"样本中 {sum(metric.relative_performance is not None for metric in metrics)} 条作品可计算账号内相对表现。",
             evidence_ids=[f"post:{post.post_id}" for post in posts[:3]],
@@ -167,7 +186,7 @@ def execute_request(request: ResearchRequest, *, adapter: Any, output_root: str 
     report_path = root / "reports" / f"{request.mode}-{request.platform}.md"
     report_path.parent.mkdir(parents=True, exist_ok=True)
     report_path.write_text(render_report(report), encoding="utf-8")
-    return ResearchExecution(plan, (raw_path,), normalized, report_path)
+    return ResearchExecution(plan, tuple(raw_paths), normalized, report_path)
 
 
 def _execute_post_mode(request: ResearchRequest, plan: ResearchPlan, adapter: Any, output_root: str | Path) -> ResearchExecution:
@@ -179,10 +198,12 @@ def _execute_post_mode(request: ResearchRequest, plan: ResearchPlan, adapter: An
     else:
         post = adapter.get_post(note_id=request.entity_id)
         comments_page = adapter.get_comments(note_id=request.entity_id) if "comments" in plan.operations else None
-    post_raw = store.save(request.platform, "post-detail", {"post_id": post.post_id, "source_url": post.source_url})
+    post_raw = store.save(request.platform, "post-detail", _adapter_last_raw(adapter, "post detail"))
     comments = comments_page.items if comments_page else []
+    raw_paths = [post_raw]
     if comments_page:
-        store.save(request.platform, "comments", comments_page.raw)
+        comments_raw = store.save(request.platform, "comments", comments_page.raw)
+        raw_paths.append(comments_raw)
     post.raw_path = str(post_raw)
     normalized = write_normalized(root, "posts", [post])
     metrics = compute_post_metrics([post])[0]
@@ -202,16 +223,19 @@ def _execute_post_mode(request: ResearchRequest, plan: ResearchPlan, adapter: An
     report_path = root / "reports" / f"{request.mode}-{request.platform}.md"
     report_path.parent.mkdir(parents=True, exist_ok=True)
     report_path.write_text(render_report(report), encoding="utf-8")
-    raw_paths = tuple(root.glob("raw/*/*.json"))
-    return ResearchExecution(plan, raw_paths, normalized, report_path)
+    return ResearchExecution(plan, tuple(raw_paths), normalized, report_path)
 
 
 def _execute_account_mode(request: ResearchRequest, plan: ResearchPlan, adapter: Any, output_root: str | Path) -> ResearchExecution:
     root = Path(output_root)
     store = RawStore(root)
-    account = adapter.get_account(request.entity_id)
-    posts_page = adapter.get_account_posts(request.entity_id, cursor="0")
-    account_raw = store.save(request.platform, "account", {"account_id": account.account_id, "name": account.name})
+    if request.platform == "douyin":
+        account = adapter.get_account(request.entity_id)
+        posts_page = adapter.get_account_posts(request.entity_id, cursor="0")
+    else:
+        account = adapter.get_account(user_id=request.entity_id)
+        posts_page = adapter.get_account_posts(user_id=request.entity_id, cursor="")
+    account_raw = store.save(request.platform, "account", _adapter_last_raw(adapter, "account"))
     posts_raw = store.save(request.platform, "account-posts", posts_page.raw)
     posts = list(posts_page.items)
     for post in posts:
@@ -240,13 +264,10 @@ def _execute_account_mode(request: ResearchRequest, plan: ResearchPlan, adapter:
 def _execute_cross_platform(request: ResearchRequest, plan: ResearchPlan, adapter: Any, secondary_adapter: Any, output_root: str | Path) -> ResearchExecution:
     root = Path(output_root)
     store = RawStore(root)
-    first = adapter.search_posts(request.query, cursor="0")
-    second = secondary_adapter.search_posts(request.query, page=1)
-    first_raw = store.save(request.platform, "search", first.raw)
-    second_raw = store.save(request.secondary_platform or "secondary", "search", second.raw)
-    posts = list(first.items) + list(second.items)
-    for post in posts:
-        post.raw_path = str(first_raw if post.platform == request.platform else second_raw)
+    first_posts, first_raw_paths = _search_posts(request, adapter, store)
+    secondary_request = replace(request, platform=request.secondary_platform or "", secondary_platform=None)
+    second_posts, second_raw_paths = _search_posts(secondary_request, secondary_adapter, store)
+    posts = first_posts + second_posts
     normalized = write_normalized(root, "posts", posts)
     metrics = compute_post_metrics(posts)
     evidence = [f"post:{post.post_id}" for post in posts[:4]]
@@ -254,7 +275,7 @@ def _execute_cross_platform(request: ResearchRequest, plan: ResearchPlan, adapte
         title="cross-platform research",
         summary=f"完成“{request.query}”在两个平台的一页样本对照。",
         task=f"研究模式：cross-platform；平台：{request.platform}、{request.secondary_platform}",
-        coverage=f"{request.platform} {len(first.items)} 条；{request.secondary_platform} {len(second.items)} 条。",
+        coverage=f"{request.platform} {len(first_posts)} 条；{request.secondary_platform} {len(second_posts)} 条。",
         findings=[Finding(text=f"两个平台共获得 {len(metrics)} 条可分析作品，指标仍按平台分别计算。", evidence_ids=evidence, evidence_class="calculated")],
         limitations=["仅比较一页样本，不直接比较平台原始热度分。"],
         confidence="low",
@@ -262,7 +283,7 @@ def _execute_cross_platform(request: ResearchRequest, plan: ResearchPlan, adapte
     report_path = root / "reports" / "cross-platform.md"
     report_path.parent.mkdir(parents=True, exist_ok=True)
     report_path.write_text(render_report(report), encoding="utf-8")
-    return ResearchExecution(plan, (first_raw, second_raw), normalized, report_path)
+    return ResearchExecution(plan, tuple(first_raw_paths + second_raw_paths), normalized, report_path)
 
 
 def _execute_trend_mode(request: ResearchRequest, plan: ResearchPlan, adapter: Any, output_root: str | Path) -> ResearchExecution:
@@ -312,14 +333,10 @@ def _execute_competitor_mode(request: ResearchRequest, plan: ResearchPlan, adapt
 def _execute_specialized_keyword_mode(request: ResearchRequest, plan: ResearchPlan, adapter: Any, output_root: str | Path) -> ResearchExecution:
     root = Path(output_root)
     store = RawStore(root)
-    page = adapter.search_posts(request.query, cursor="0")
-    raw_path = store.save(request.platform, "search", page.raw)
-    posts = list(page.items)
-    for post in posts:
-        post.raw_path = str(raw_path)
+    posts, raw_paths = _search_posts(request, adapter, store)
     normalized = write_normalized(root, "posts", posts)
     metrics = compute_post_metrics(posts)
-    evidence = [f"post:{post.post_id}" for post in posts[:5]] or [f"raw:{raw_path.name}"]
+    evidence = [f"post:{post.post_id}" for post in posts[:5]] or [f"raw:{raw_paths[0].name}"]
     labels = {
         "content-gap": ("内容空白", "供给与需求"),
         "brand-product": ("品牌/产品", "公开提及与疑问"),
@@ -339,7 +356,31 @@ def _execute_specialized_keyword_mode(request: ResearchRequest, plan: ResearchPl
     report_path = root / "reports" / f"{request.mode}-{request.platform}.md"
     report_path.parent.mkdir(parents=True, exist_ok=True)
     report_path.write_text(render_report(report), encoding="utf-8")
-    return ResearchExecution(plan, (raw_path,), normalized, report_path)
+    return ResearchExecution(plan, tuple(raw_paths), normalized, report_path)
+
+
+def _search_posts(request: ResearchRequest, adapter: Any, store: RawStore) -> tuple[list[Any], list[Path]]:
+    cursor: str | None = "0" if request.platform == "douyin" else None
+    posts: list[Any] = []
+    raw_paths: list[Path] = []
+    for _ in range(request.sample_pages):
+        page = adapter.search_posts(request.query, cursor=cursor)
+        raw_path = store.save(request.platform, "search", page.raw)
+        raw_paths.append(raw_path)
+        for post in page.items:
+            post.raw_path = str(raw_path)
+            posts.append(post)
+        if not page.has_more or page.next_cursor is None:
+            break
+        cursor = page.next_cursor
+    return posts, raw_paths
+
+
+def _adapter_last_raw(adapter: Any, operation: str) -> dict[str, Any]:
+    raw = getattr(adapter, "last_raw", None)
+    if not isinstance(raw, dict):
+        raise RuntimeError(f"adapter did not retain the raw response for {operation}")
+    return raw
 
 
 def main() -> int:
@@ -349,9 +390,10 @@ def main() -> int:
     parser.add_argument("--query", required=True)
     parser.add_argument("--entity-id")
     parser.add_argument("--secondary-platform", choices=sorted(PLATFORMS))
+    parser.add_argument("--sample-pages", type=int, default=1)
     parser.add_argument("--out", default="research-output")
     args = parser.parse_args()
-    request = ResearchRequest(mode=args.mode, platform=args.platform, query=args.query, entity_id=args.entity_id, secondary_platform=args.secondary_platform)
+    request = ResearchRequest(mode=args.mode, platform=args.platform, query=args.query, entity_id=args.entity_id, secondary_platform=args.secondary_platform, sample_pages=args.sample_pages)
     plan = plan_request(request)
     print(plan.cost_notice)
     if plan.request_count > 20:
@@ -360,8 +402,12 @@ def main() -> int:
     from adapters.douyin import DouyinAdapter
     from adapters.xiaohongshu import XiaohongshuAdapter
     client = TikHubClient()
-    adapter = DouyinAdapter(client) if args.platform == "douyin" else XiaohongshuAdapter(client)
-    result = execute_request(request, adapter=adapter, output_root=args.out)
+    def make_adapter(platform: str):
+        return DouyinAdapter(client) if platform == "douyin" else XiaohongshuAdapter(client)
+
+    adapter = make_adapter(args.platform)
+    secondary_adapter = make_adapter(args.secondary_platform) if args.secondary_platform else None
+    result = execute_request(request, adapter=adapter, secondary_adapter=secondary_adapter, output_root=args.out)
     print(f"报告已生成：{result.report_path}")
     return 0
 

@@ -139,6 +139,7 @@ def _string(value: Any) -> str | None:
 class DouyinAdapter:
     def __init__(self, client: Any):
         self.client = client
+        self.last_raw: dict[str, Any] | None = None
 
     def search_posts(self, keyword: str, *, cursor: str = "0") -> Page[Post]:
         raw = self.client.post(VIDEO_SEARCH, {
@@ -161,6 +162,7 @@ class DouyinAdapter:
 
     def get_account(self, sec_user_id: str) -> Account:
         raw = self.client.get(PROFILE, {"sec_user_id": sec_user_id}).data
+        self.last_raw = raw
         body = _body(raw)
         user = body.get("user") or body.get("user_info") or body
         if not isinstance(user, dict):
@@ -192,6 +194,7 @@ class DouyinAdapter:
         path = VIDEO if aweme_id is not None else VIDEO_BY_URL
         params = {"aweme_id": aweme_id} if aweme_id is not None else {"share_url": share_url}
         raw = self.client.get(path, params).data
+        self.last_raw = raw
         body = _body(raw)
         detail = body.get("aweme_detail") or body.get("aweme")
         if not isinstance(detail, dict):
