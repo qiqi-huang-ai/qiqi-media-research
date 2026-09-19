@@ -69,6 +69,8 @@ python3 -m scripts.research_runner \
 
 `research-output/raw/` 保存原始响应，`normalized/` 保存统一 JSONL，`manifest.json` 记录实际调用清单（不含凭证），Markdown 报告记录 evidence ID、覆盖范围和局限。
 
+每次研究正文完成后，还会生成一份亮色科技风的可视化 PDF。PDF 规范、命令和验收要求见 [references/visual-pdf.md](references/visual-pdf.md)。
+
 ## 成本与数据边界
 
 TikHub 的额度、价格和接口状态可能变化，本项目不提供免费额度。抖音 Search 单独纳入计费预估。默认从 1–3 个样本开始，计划超过 20 次调用时必须再次确认。只处理公开数据，不绕过权限。
