@@ -25,6 +25,8 @@
 
 Markdown 是内容真源，PDF 由同一 Markdown 渲染。PDF 可以增加图表和视觉层级，但不得改变数字、样本量、链接、结论强度或证据边界。内部 evidence ID 和证据类别只保留在 `analysis/findings.json`，面向用户的 Markdown 与 PDF 都使用自然语言。
 
+`account-audit` 采用两阶段交付：运行器先写入 `analysis/data-pack.json` 和草稿，代理语义复核后才写入 `reports/account-audit-<platform>.md`。原始作品明细必须放在“附录：原始作品明细”，不得用草稿替代最终报告。
+
 ## 信息密度
 
 - 不用基础画像、排行榜和空章节堆长度。

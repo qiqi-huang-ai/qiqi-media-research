@@ -36,6 +36,19 @@ description: 使用 TikHub REST API 研究公开社媒数据，完成赛道、�
 14. 交付前对最终 Markdown 运行 `python3 -m scripts.delivery_audit <研究根目录> --report <最终报告>`，再读取 `analysis/delivery-audit.json`：`failed` 不得包装成成熟报告；`ready_with_caveats` 必须把具体缺口写入研究边界；只有 `ready` 才能声称数据链路验收通过。账号审计另需通过 18+ 条结论和近期/历史、稳定/偶发、可复制/待验证等硬检。
 15. 报告不能只列 Top 内容：凡模式涉及账号、选题或趋势，都要建立中位数基线，并把高表现与普通/低表现样本进行对照。不能计算时明确说明缺少哪类公开数据。
 
+### account-audit 的两阶段交付（必须执行）
+
+账号审计运行器只负责生成确定性研究数据包，不直接生成最终读者报告。运行后必须确认存在：
+
+- `analysis/data-pack.json`：账号、作品、真实播放量、互动指标、评论和确定性发现；
+- `analysis/draft-account-audit.md`：仅供代理读取的草稿；
+- `analysis/semantic-review.template.json`：语义复核清单；
+- `reports/account-audit-<platform>.md`：此时应该尚不存在。
+
+然后由代理读取 `data-pack.json` 和相关标准化数据，完成一轮独立语义分析，重写最终 Markdown。正文必须回答账号定位、近期与历史样本、高低表现差异、评论需求、稳定规律与偶发爆款、可复制边界、内容空白和行动建议；原始作品逐条明细只能放在“附录：原始作品明细”。不得修改数据包中的原始数值。
+
+代理完成后，将 `analysis/semantic-review.template.json` 填写为 `analysis/semantic-review.json`：把 `status` 改为 `reviewed`，并逐项填写 7 个 `reviewed_sections`，每项说明最终报告对应的结论和依据。最后运行交付审计；缺最终报告、缺语义复核记录或复核项为空，必须是 `failed`，不得向用户交付成熟报告。
+
 用户同时要求热门内容、用户痛点和选题时，不得只跑一次关键词搜索。组合执行：搜索与时间过滤 → 高表现及普通基线作品详情/统计 → 代表作品评论 → 评论聚合 → 选题。各阶段共享已有原始数据，避免重复调用。
 
 把用户明确要求映射为交付合同并写入 `requirements`：时间范围=`time-window`，作品信息=`post-metadata`，真实可见指标=`visible-metrics`，评论痛点=`comment-insights`，爆款/趋势区分=`trend-distinction`，选题=`content-ideas`，文本层钩子/结构=`text-hook-structure`。验收器会逐项查证；不要省略用户已经提出的要求。

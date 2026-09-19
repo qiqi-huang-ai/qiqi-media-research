@@ -129,6 +129,24 @@ def audit_delivery(root: str | Path, report_path: str | Path) -> DeliveryAudit:
         missing_sections = [title for title in required_sections if not _meaningful_section(report_text, title)]
         add("required_mature_mode_report", not missing_sections, "模式核心问题均已回答" if not missing_sections else f"缺少成熟分析章节：{', '.join(missing_sections)}")
         if mode == "account-audit":
+            review_path = root / "analysis" / "semantic-review.json"
+            review = json.loads(review_path.read_text(encoding="utf-8")) if review_path.is_file() else {}
+            reviewed_sections = review.get("reviewed_sections") if isinstance(review, dict) else None
+            required_review_sections = {
+                "account_positioning", "recent_vs_historical", "high_vs_low_comparison",
+                "comment_insights", "stable_vs_one_off", "copyable_boundaries", "actions_and_validation",
+            }
+            review_ok = (
+                review.get("status") == "reviewed"
+                and review.get("mode") == "account-audit"
+                and review.get("source_data_pack") == "analysis/data-pack.json"
+                and isinstance(reviewed_sections, dict)
+                and required_review_sections <= set(reviewed_sections)
+                and all(str(reviewed_sections.get(key, "")).strip() for key in required_review_sections)
+            )
+            add("semantic_review", review_ok, "语义复核记录完整" if review_ok else "缺少由代理完成的 semantic-review.json，或复核项未逐项填写")
+            appendix_ok = "## 附录：原始作品明细" in report_text and "## 核心发现" in report_text
+            add("raw_details_appendix", appendix_ok, "原始明细位于附录，正文保留分析结论" if appendix_ok else "原始明细未放入附录或正文缺少核心分析")
             finding_count = len(ledger)
             required_markers = {
                 "账号定位：": "账号定位",
@@ -148,7 +166,7 @@ def audit_delivery(root: str | Path, report_path: str | Path) -> DeliveryAudit:
     essential = {"research_brief", "manifest", "raw_evidence", "normalized_data", "report", "evidence_ledger", "identity_fields", "duplicate_posts", "zero_view_semantics", "source_links", "visible_metrics", "time_filter"}
     essential.update(check.name for check in checks if check.name.startswith("required_"))
     if mode == "account-audit":
-        essential.add("account_analysis_density")
+        essential.update({"account_analysis_density", "semantic_review", "raw_details_appendix"})
     failed_essential = [check for check in checks if check.name in essential and not check.passed]
     status = "failed" if failed_essential else "ready" if all(check.passed for check in checks) else "ready_with_caveats"
     return DeliveryAudit(status, tuple(checks))

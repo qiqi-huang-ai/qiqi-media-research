@@ -4,7 +4,7 @@ This module owns routing and planning. Platform adapters remain responsible for
 endpoint details; semantic interpretation remains evidence-bound report work.
 """
 
-from dataclasses import dataclass, replace
+from dataclasses import asdict, dataclass, replace
 from collections import Counter, defaultdict
 from datetime import datetime, timedelta, timezone
 import json
@@ -261,6 +261,59 @@ def _write_report(root: Path, filename: str, report: ResearchReport) -> Path:
         encoding="utf-8",
     )
     return report_path
+
+
+def _write_account_data_pack(
+    root: Path,
+    report: ResearchReport,
+    account: Any,
+    posts: list[Any],
+    metrics: list[Any],
+    comments: list[Any],
+    *,
+    final_filename: str,
+) -> None:
+    """Persist deterministic account evidence without presenting it as final prose.
+
+    The agent must read this pack and write the reader-facing report after a
+    semantic pass. Keeping the draft under analysis/ prevents the runner from
+    being mistaken for the final account audit.
+    """
+    analysis = root / "analysis"
+    analysis.mkdir(parents=True, exist_ok=True)
+    (analysis / "draft-account-audit.md").write_text(render_report(report), encoding="utf-8")
+    (analysis / "findings.json").write_text(
+        json.dumps(evidence_ledger(report), ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+    )
+    pack = {
+        "status": "deterministic-data-pack",
+        "mode": "account-audit",
+        "final_report": f"reports/{final_filename}",
+        "account": asdict(account),
+        "posts": [asdict(post) for post in posts],
+        "metrics": [asdict(metric) for metric in metrics],
+        "comments": [asdict(comment) for comment in comments],
+        "findings": evidence_ledger(report),
+    }
+    (analysis / "data-pack.json").write_text(json.dumps(pack, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    template = {
+        "status": "pending",
+        "mode": "account-audit",
+        "source_data_pack": "analysis/data-pack.json",
+        "final_report": f"reports/{final_filename}",
+        "reviewed_sections": {
+            "account_positioning": "",
+            "recent_vs_historical": "",
+            "high_vs_low_comparison": "",
+            "comment_insights": "",
+            "stable_vs_one_off": "",
+            "copyable_boundaries": "",
+            "actions_and_validation": "",
+        },
+    }
+    (analysis / "semantic-review.template.json").write_text(
+        json.dumps(template, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+    )
 
 
 def _positive_values(values: list[int | float | None]) -> list[float]:
@@ -871,7 +924,13 @@ def _execute_account_mode(request: ResearchRequest, plan: ResearchPlan, adapter:
         confidence_note="公开账号事实和样本内统计可复算；策略结论仅在当前样本范围内成立。",
         validation_steps=["后续复核时保持同一口径增加作品页数，并比较模式的持续性，而不是只追踪单条最高播放作品。"],
     )
-    report_path = _write_report(root, f"account-audit-{request.platform}.md", report)
+    final_filename = f"account-audit-{request.platform}.md"
+    _write_account_data_pack(
+        root, report, account, posts, metrics, comments, final_filename=final_filename
+    )
+    # The final reader-facing report is intentionally absent until the agent
+    # completes the semantic review described in SKILL.md.
+    report_path = root / "reports" / final_filename
     return ResearchExecution(plan, tuple(raw_paths), normalized, report_path)
 
 

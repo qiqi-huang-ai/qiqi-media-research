@@ -11,7 +11,7 @@ SECTIONS = (
     "结论摘要",
     "研究任务",
     "数据覆盖",
-    "原始作品明细",
+    "附录：原始作品明细",
     "核心发现",
     "赛道与趋势",
     "对标账号",
@@ -22,7 +22,7 @@ SECTIONS = (
     "建议选题与下一步",
     "局限与置信度",
 )
-FINDING_SECTIONS = set(SECTIONS) - {"结论摘要", "研究任务", "数据覆盖", "原始作品明细", "局限与置信度"}
+FINDING_SECTIONS = set(SECTIONS) - {"结论摘要", "研究任务", "数据覆盖", "附录：原始作品明细", "局限与置信度"}
 EVIDENCE_CLASSES = {"observed", "calculated", "interpreted", "hypothesis"}
 
 
@@ -77,7 +77,7 @@ def render_report(report: ResearchReport) -> str:
             content = _escape(report.task)
         elif section == "数据覆盖":
             content = _escape(report.coverage)
-        elif section == "原始作品明细":
+        elif section == "附录：原始作品明细":
             rendered_details = []
             for item in report.post_details:
                 escaped = _escape(item)

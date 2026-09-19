@@ -185,16 +185,13 @@ def test_execute_account_audit_requires_entity_id(tmp_path):
         adapter=FakeAdapter(),
         output_root=tmp_path,
     )
-    assert result.report_path.is_file()
-    report = result.report_path.read_text()
-    assert "对标账号审计" in report
-    assert "账号事实：" in report
-    assert "表现基线：" in report
-    assert "分组对照：" in report
-    assert "标题/文案模式：" in report
-    assert "可执行建议：" in report
+    assert not result.report_path.exists()
+    assert (tmp_path / "analysis/data-pack.json").is_file()
+    assert (tmp_path / "analysis/draft-account-audit.md").is_file()
+    assert (tmp_path / "analysis/semantic-review.template.json").is_file()
     audit = json.loads(result.audit_path.read_text())
-    assert audit["status"] == "ready"
+    assert audit["status"] == "failed"
+    assert any(item["name"] == "semantic_review" and not item["passed"] for item in audit["checks"])
 
 
 def test_execute_cross_platform_requires_and_combines_second_adapter(tmp_path):
