@@ -34,6 +34,10 @@ MODES = (
     "market-map",
 )
 PLATFORMS = {"douyin", "xiaohongshu"}
+REQUIREMENTS = {
+    "time-window", "post-metadata", "visible-metrics", "comment-insights",
+    "trend-distinction", "content-ideas", "text-hook-structure",
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -47,6 +51,7 @@ class ResearchRequest:
     comment_pages: int = 0
     start_at: str | None = None
     end_at: str | None = None
+    requirements: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -203,6 +208,9 @@ def plan_request(request: ResearchRequest) -> ResearchPlan:
         raise ValueError("sample_pages must be between 1 and 3")
     if request.comment_pages < 0 or request.comment_pages > 1:
         raise ValueError("comment_pages must be between 0 and 1")
+    unknown_requirements = set(request.requirements) - REQUIREMENTS
+    if unknown_requirements:
+        raise ValueError(f"unsupported delivery requirements: {sorted(unknown_requirements)}")
     _parse_bound(request.start_at, "start_at")
     _parse_bound(request.end_at, "end_at")
     if request.start_at and request.end_at and _parse_bound(request.start_at, "start_at") > _parse_bound(request.end_at, "end_at"):
@@ -301,6 +309,7 @@ def execute_request(request: ResearchRequest, *, adapter: Any, output_root: str 
         "end_at": request.end_at,
         "planned_requests": result.plan.request_count,
         "actual_requests": len(result.raw_paths),
+        "requirements": list(request.requirements),
     }, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     audit_path = write_delivery_audit(output_root, audit_delivery(output_root, result.report_path))
     return replace(result, manifest_path=manifest, brief_path=brief, audit_path=audit_path)
@@ -624,9 +633,10 @@ def main() -> int:
     parser.add_argument("--sample-pages", type=int, default=1)
     parser.add_argument("--start-at", help="ISO-8601 UTC or timezone-aware lower bound")
     parser.add_argument("--end-at", help="ISO-8601 UTC or timezone-aware upper bound")
+    parser.add_argument("--require", action="append", choices=sorted(REQUIREMENTS), default=[], help="Evidence-backed output required for delivery; repeat as needed")
     parser.add_argument("--out", default="research-output")
     args = parser.parse_args()
-    request = ResearchRequest(mode=args.mode, platform=args.platform, query=args.query, entity_id=args.entity_id, secondary_platform=args.secondary_platform, sample_pages=args.sample_pages, start_at=args.start_at, end_at=args.end_at)
+    request = ResearchRequest(mode=args.mode, platform=args.platform, query=args.query, entity_id=args.entity_id, secondary_platform=args.secondary_platform, sample_pages=args.sample_pages, start_at=args.start_at, end_at=args.end_at, requirements=tuple(args.require))
     plan = plan_request(request)
     print(plan.cost_notice)
     if plan.request_count > 20:
@@ -646,8 +656,7 @@ def main() -> int:
         audit = json.loads(result.audit_path.read_text(encoding="utf-8"))
         print(f"交付验收：{audit['status']}（{result.audit_path}）")
         if audit["status"] == "failed":
-            print("数据链路未通过强制验收；报告仅供排查，不得作为成熟交付。")
-            return 2
+            print("当前阶段尚未满足全部交付合同；组合研究可继续补证，最终必须重新运行 delivery_audit。")
     return 0
 
 

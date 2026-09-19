@@ -38,3 +38,10 @@ Markdown 是内容真源，PDF 由同一 Markdown 渲染。PDF 可以增加图�
 - `ready`：关键身份字段、原始证据、标准化数据、报告和时间过滤均通过，指标覆盖达到阈值。
 - `ready_with_caveats`：证据链完整，但部分互动指标缺失；必须在研究边界中披露。
 - `failed`：缺原始证据、身份字段、时间过滤记录、标准化数据或报告；不得作为成熟案例交付。
+
+组合研究可把单作品详情和评论保存在研究根目录的子目录中；验收器会递归检查原始证据。最终 Markdown 完成后运行：
+
+```bash
+python3 -m scripts.delivery_audit research-output/任务目录 \
+  --report research-output/任务目录/reports/final.md
+```

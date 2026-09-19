@@ -23,6 +23,11 @@ def test_unknown_mode_is_rejected():
         plan_request(ResearchRequest(mode="video-editing", platform="douyin", query="AI工具"))
 
 
+def test_unknown_delivery_requirement_is_rejected():
+    with pytest.raises(ValueError, match="unsupported delivery requirements"):
+        plan_request(ResearchRequest(mode="niche-discovery", platform="douyin", query="AI工具", requirements=("video-understanding",)))
+
+
 def test_date_bounds_are_validated():
     with pytest.raises(ValueError, match="start_at must be earlier"):
         plan_request(ResearchRequest(mode="niche-discovery", platform="douyin", query="AI工具", start_at="2026-09-20T00:00:00+00:00", end_at="2026-09-19T00:00:00+00:00"))

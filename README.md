@@ -49,8 +49,11 @@ python3 -m scripts.research_runner \
 python3 -m scripts.research_runner \
   --mode niche-discovery --platform douyin --query "WorkBuddy" \
   --start-at "2026-09-12T00:00:00+08:00" \
-  --end-at "2026-09-19T23:59:59+08:00"
+  --end-at "2026-09-19T23:59:59+08:00" \
+  --require time-window --require post-metadata --require visible-metrics
 ```
+
+`--require` 是交付合同，可重复使用。当前支持：`time-window`、`post-metadata`、`visible-metrics`、`comment-insights`、`trend-distinction`、`content-ideas`、`text-hook-structure`。单个采集阶段可以暂时显示 `failed` 并继续补证；最终必须运行 `python3 -m scripts.delivery_audit ... --report ...`，该命令在证据缺失时返回失败状态，结果不得作为成熟交付。
 
 跨平台研究必须提供第二个平台：
 
