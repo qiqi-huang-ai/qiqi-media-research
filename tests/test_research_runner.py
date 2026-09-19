@@ -1,7 +1,7 @@
 import json
 import pytest
 
-from scripts.research_runner import MODES, ResearchRequest, _filter_posts, execute_request, plan_request
+from scripts.research_runner import MODES, ResearchRequest, _effective_requirements, _filter_posts, execute_request, plan_request
 
 
 def test_all_eleven_modes_have_a_bounded_plan():
@@ -11,6 +11,14 @@ def test_all_eleven_modes_have_a_bounded_plan():
         assert plan.request_count > 0
         assert plan.request_count <= 20
         assert plan.operations
+
+
+def test_short_prompts_receive_a_mature_mode_contract_by_default():
+    for mode in MODES:
+        request = ResearchRequest(mode=mode, platform="douyin", query="AI工具", secondary_platform="xiaohongshu" if mode == "cross-platform" else None)
+        assert "mature-mode-report" in _effective_requirements(request)
+    account_requirements = set(_effective_requirements(ResearchRequest(mode="account-audit", platform="douyin", query="账号", entity_id="sec-1")))
+    assert {"account-profile", "account-baseline", "account-patterns", "top-bottom-comparison", "actionable-recommendations"} <= account_requirements
 
 
 def test_cross_platform_requires_two_platforms():
@@ -79,8 +87,13 @@ class FakeAdapter:
         return Page([Comment(platform="douyin", comment_id="c1", post_id=aweme_id, source_url="https://example/p1", text="多少钱")], None, False, {"comments": ["fixture"]})
 
     def get_video_statistics(self, aweme_ids):
-        self.last_statistics_raw = {"data": {"statistics_list": [{"aweme_id": aweme_ids[0], "play_count": 1000}]}}
-        return {aweme_ids[0]: {"play_count": 1000}}
+        rows = [
+            {"aweme_id": post_id, "play_count": 1000 - index * 150, "digg_count": 100 - index * 10,
+             "comment_count": 20 - index, "share_count": 10 - index, "collect_count": 30 - index}
+            for index, post_id in enumerate(aweme_ids)
+        ]
+        self.last_statistics_raw = {"data": {"statistics_list": rows}}
+        return {row["aweme_id"]: row for row in rows}
 
     def get_account(self, sec_user_id):
         from scripts.models import Account
@@ -88,7 +101,16 @@ class FakeAdapter:
         return Account(platform="douyin", account_id=sec_user_id, source_url="https://example/a", name="Test")
 
     def get_account_posts(self, sec_user_id, **kwargs):
-        return self.search_posts("account")
+        from adapters.base import Page
+        from scripts.models import Post
+        posts = [
+            Post(platform="douyin", post_id=f"a{index}", source_url=f"https://example/a{index}",
+                 author_id=sec_user_id, author_name="Test", text=text,
+                 published_at=f"2026-09-{10 + index:02d}T00:00:00+00:00",
+                 views=100 * index, likes=10 * index, comments=index, shares=index, saves=index)
+            for index, text in enumerate(("AI工具上线实测", "3个Prompt工作流", "为什么AI会淘汰岗位", "新手教程怎么用"), 1)
+        ]
+        return Page(posts, None, False, {"items": ["account-fixture"]})
 
     def get_trends(self):
         from adapters.base import Page
@@ -122,7 +144,9 @@ def test_execute_keyword_mode_writes_evidence_and_report(tmp_path):
     assert "原始作品明细" in report
     assert "原始链接" in report
     assert "播放" in report
-    assert "evidence:" in report
+    assert "evidence:" not in report
+    ledger = json.loads((tmp_path / "analysis/findings.json").read_text())
+    assert ledger[0]["evidence_ids"]
 
 
 def test_execute_viral_breakdown_requires_post_id_and_writes_comment_evidence(tmp_path):
@@ -132,7 +156,9 @@ def test_execute_viral_breakdown_requires_post_id_and_writes_comment_evidence(tm
         output_root=tmp_path,
     )
     assert result.report_path.is_file()
-    assert "comment:c1" in result.report_path.read_text()
+    assert "comment:c1" not in result.report_path.read_text()
+    ledger = json.loads((tmp_path / "analysis/findings.json").read_text())
+    assert any("comment:c1" in item["evidence_ids"] for item in ledger)
     assert "评论需求" in result.report_path.read_text()
     assert result.brief_path and result.brief_path.is_file()
 
@@ -160,7 +186,15 @@ def test_execute_account_audit_requires_entity_id(tmp_path):
         output_root=tmp_path,
     )
     assert result.report_path.is_file()
-    assert "account-audit" in result.report_path.read_text()
+    report = result.report_path.read_text()
+    assert "对标账号审计" in report
+    assert "账号事实：" in report
+    assert "表现基线：" in report
+    assert "分组对照：" in report
+    assert "标题/文案模式：" in report
+    assert "可执行建议：" in report
+    audit = json.loads(result.audit_path.read_text())
+    assert audit["status"] == "ready"
 
 
 def test_execute_cross_platform_requires_and_combines_second_adapter(tmp_path):
@@ -205,7 +239,9 @@ def test_execute_competitor_discovery_writes_account_evidence(tmp_path):
         output_root=tmp_path,
     )
     assert result.report_path.is_file()
-    assert "account:sec-1" in result.report_path.read_text()
+    assert "account:sec-1" not in result.report_path.read_text()
+    ledger = json.loads((tmp_path / "analysis/findings.json").read_text())
+    assert any("account:sec-1" in item["evidence_ids"] for item in ledger)
 
 
 @pytest.mark.parametrize("mode,marker", [

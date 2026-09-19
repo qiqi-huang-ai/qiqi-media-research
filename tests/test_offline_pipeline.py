@@ -1,4 +1,4 @@
-from scripts.report import render_report
+from scripts.report import evidence_ledger, render_report
 
 
 def test_fixture_pipeline_creates_evidence_bound_report(tmp_path):
@@ -9,4 +9,5 @@ def test_fixture_pipeline_creates_evidence_bound_report(tmp_path):
     assert result.raw_files
     assert result.normalized_posts
     assert "核心发现" in report
-    assert "evidence:" in report
+    assert "evidence:" not in report
+    assert evidence_ledger(result.report)[0]["evidence_ids"]

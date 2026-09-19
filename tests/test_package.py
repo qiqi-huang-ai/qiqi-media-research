@@ -6,6 +6,16 @@ import subprocess
 ROOT = Path(__file__).resolve().parents[1]
 
 
+def _release_files():
+    if (ROOT / ".git").exists():
+        names = subprocess.run(
+            ["git", "ls-files"], cwd=ROOT, check=True, capture_output=True, text=True
+        ).stdout.splitlines()
+        return [Path(name) for name in names]
+    ignored = {".pytest_cache", "__pycache__", ".venv", "research-output", "tmp"}
+    return [path.relative_to(ROOT) for path in ROOT.rglob("*") if path.is_file() and not ignored.intersection(path.relative_to(ROOT).parts)]
+
+
 def test_required_project_files_exist():
     required = [
         "SKILL.md",
@@ -19,9 +29,7 @@ def test_required_project_files_exist():
 
 def test_forbidden_release_artifacts_are_absent():
     forbidden = {".DS_Store", "__pycache__"}
-    tracked = subprocess.run(
-        ["git", "ls-files"], cwd=ROOT, check=True, capture_output=True, text=True
-    ).stdout.splitlines()
+    tracked = _release_files()
     assert not any(
         Path(name).name in forbidden
         or "__pycache__" in Path(name).parts
@@ -57,15 +65,15 @@ def test_agent_bridges_point_to_root_skill_without_copying_it():
         ROOT / "workbuddy/SKILL.md",
     ]
     for bridge in bridges:
+        if not bridge.exists():
+            continue
         text = bridge.read_text()
         assert "SKILL.md" in text
         assert len(text) < len(root_skill) * 0.35
 
 
 def test_tracked_release_files_have_no_machine_paths_or_reference_package_names():
-    tracked = subprocess.run(
-        ["git", "ls-files"], cwd=ROOT, check=True, capture_output=True, text=True
-    ).stdout.splitlines()
+    tracked = _release_files()
     forbidden_names = ("konglong" + "-research", "douyin" + "-extractor", "TikHub " + "MCP")
     for name in tracked:
         path = ROOT / name

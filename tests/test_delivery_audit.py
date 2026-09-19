@@ -8,12 +8,17 @@ def _write_json(path, payload):
     path.write_text(json.dumps(payload, ensure_ascii=False) + "\n", encoding="utf-8")
 
 
+def _write_ledger(root):
+    _write_json(root / "analysis/findings.json", [{"text": "结论", "evidence_class": "observed", "evidence_ids": ["post:p1"]}])
+
+
 def test_complete_post_delivery_is_ready(tmp_path):
     _write_json(tmp_path / "brief.json", {"mode": "niche-discovery", "start_at": "2026-09-12T00:00:00+00:00", "end_at": "2026-09-19T00:00:00+00:00"})
     _write_json(tmp_path / "manifest.json", {"request_count": 2})
     _write_json(tmp_path / "raw/douyin/search-a.json", {"data": {}})
     _write_json(tmp_path / "analysis/data-quality.json", {"total": 1, "complete_identity": 1, "missing_metric_ratio": 0.0, "duplicate_post_ids": 0})
     _write_json(tmp_path / "analysis/search-filter.json", {"filtered_result_count": 1})
+    _write_ledger(tmp_path)
     _write_json(tmp_path / "normalized/posts.jsonl", {"post_id": "p1", "source_url": "https://example/p1", "views": 100})
     report = tmp_path / "reports/report.md"
     report.parent.mkdir(parents=True)
@@ -27,6 +32,7 @@ def test_missing_identity_blocks_delivery(tmp_path):
     _write_json(tmp_path / "manifest.json", {})
     _write_json(tmp_path / "raw/douyin/search-a.json", {})
     _write_json(tmp_path / "analysis/data-quality.json", {"total": 1, "complete_identity": 0, "missing_metric_ratio": 0.2, "duplicate_post_ids": 0})
+    _write_ledger(tmp_path)
     _write_json(tmp_path / "normalized/posts.jsonl", {"post_id": "p1", "source_url": "https://example/p1", "views": 100})
     report = tmp_path / "reports/report.md"
     report.parent.mkdir(parents=True)
@@ -39,6 +45,7 @@ def test_requested_comment_insights_require_raw_comments(tmp_path):
     _write_json(tmp_path / "manifest.json", {})
     _write_json(tmp_path / "raw/douyin/search-a.json", {})
     _write_json(tmp_path / "analysis/data-quality.json", {"total": 1, "complete_identity": 1, "missing_metric_ratio": 0.0, "duplicate_post_ids": 0})
+    _write_ledger(tmp_path)
     _write_json(tmp_path / "normalized/posts.jsonl", {"platform": "douyin", "post_id": "p1", "source_url": "https://example/p1", "views": 100, "views_source": "statistics"})
     report = tmp_path / "reports/report.md"
     report.parent.mkdir(parents=True)
@@ -46,3 +53,18 @@ def test_requested_comment_insights_require_raw_comments(tmp_path):
     result = audit_delivery(tmp_path, report)
     assert result.status == "failed"
     assert any(check.name == "required_comment_insights" and not check.passed for check in result.checks)
+
+
+def test_short_prompt_mode_contract_blocks_a_skeletal_report(tmp_path):
+    _write_json(tmp_path / "brief.json", {"mode": "competitor-discovery", "requirements": ["mature-mode-report"]})
+    _write_json(tmp_path / "manifest.json", {})
+    _write_json(tmp_path / "raw/douyin/account-search-a.json", {})
+    _write_json(tmp_path / "normalized/accounts.jsonl", {"account_id": "a1", "source_url": "https://example/a1"})
+    _write_ledger(tmp_path)
+    report = tmp_path / "reports/report.md"
+    report.parent.mkdir(parents=True)
+    report.write_text("# report\n\n## 对标账号\n\n- 候选账号 1 个\n", encoding="utf-8")
+    result = audit_delivery(tmp_path, report)
+    assert result.status == "failed"
+    check = next(item for item in result.checks if item.name == "required_mature_mode_report")
+    assert "建议选题与下一步" in check.detail

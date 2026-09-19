@@ -1,4 +1,4 @@
 interface:
   display_name: "qiqi 社媒研究"
   short_description: "用公开社媒证据研究趋势、对标账号、评论需求和内容机会"
-  default_prompt: "使用 qiqi-media-research 分析这个社媒研究问题，先做低成本样本验证。"
+  default_prompt: "使用 qiqi-media-research 分析这个社媒研究问题。即使我的描述很短，也请按对应模式补全成熟报告所需的数据、对照和行动建议。"

@@ -30,6 +30,7 @@ def audit_delivery(root: str | Path, report_path: str | Path) -> DeliveryAudit:
     brief_path = root / "brief.json"
     manifest_path = root / "manifest.json"
     quality_path = root / "analysis" / "data-quality.json"
+    ledger_path = root / "analysis" / "findings.json"
     brief = json.loads(brief_path.read_text(encoding="utf-8")) if brief_path.is_file() else {}
     mode = brief.get("mode")
     entity = "trends" if mode == "trend-scan" else "accounts" if mode == "competitor-discovery" else "posts"
@@ -40,6 +41,9 @@ def audit_delivery(root: str | Path, report_path: str | Path) -> DeliveryAudit:
     add("raw_evidence", bool(raw_files), f"原始响应 {len(raw_files)} 份")
     add("normalized_data", normalized_path.is_file(), f"{entity}.jsonl 已生成" if normalized_path.is_file() else f"缺少 {entity}.jsonl")
     add("report", report_path.is_file(), "Markdown 报告已生成" if report_path.is_file() else "缺少 Markdown 报告")
+    ledger = json.loads(ledger_path.read_text(encoding="utf-8")) if ledger_path.is_file() else []
+    valid_ledger = bool(ledger) and all(item.get("evidence_ids") and item.get("evidence_class") for item in ledger)
+    add("evidence_ledger", valid_ledger, f"内部证据记录 {len(ledger)} 条" if ledger_path.is_file() else "缺少 analysis/findings.json")
 
     if entity == "posts":
         quality = json.loads(quality_path.read_text(encoding="utf-8")) if quality_path.is_file() else {}
@@ -96,8 +100,35 @@ def audit_delivery(root: str | Path, report_path: str | Path) -> DeliveryAudit:
     if "text-hook-structure" in requirements:
         has_boundary = "初步" in report_text or "基于标题/文案" in report_text or "待视频画面复核" in report_text
         add("required_text_hook_structure", "开头钩子判断：" in report_text and "内容结构判断：" in report_text and has_boundary, "文本层钩子/结构及证据边界已呈现")
+    if "account-profile" in requirements:
+        account_path = root / "normalized" / "accounts.jsonl"
+        add("required_account_profile", account_path.is_file() and "账号事实：" in report_text, "账号资料已标准化并进入报告")
+    if "account-baseline" in requirements:
+        add("required_account_baseline", "表现基线：" in report_text, "账号样本表现基线已计算")
+    if "account-patterns" in requirements:
+        add("required_account_patterns", "标题/文案模式：" in report_text, "标题/文案模式已按样本统计")
+    if "top-bottom-comparison" in requirements:
+        add("required_top_bottom_comparison", "分组对照：" in report_text, "高表现与低表现样本已对照")
+    if "actionable-recommendations" in requirements:
+        add("required_actionable_recommendations", "可执行建议：" in report_text, "建议已连接到样本基线和模式")
+    if "mature-mode-report" in requirements:
+        required_sections = {
+            "niche-discovery": ("核心发现", "赛道与趋势", "高表现内容", "建议选题与下一步"),
+            "trend-scan": ("赛道与趋势", "高表现内容", "建议选题与下一步"),
+            "competitor-discovery": ("对标账号", "建议选题与下一步"),
+            "account-audit": ("核心发现", "对标账号", "高表现内容", "评论需求", "建议选题与下一步"),
+            "viral-breakdown": ("核心发现", "高表现内容", "评论需求", "建议选题与下一步"),
+            "comment-mining": ("评论需求", "建议选题与下一步"),
+            "content-gap": ("高表现内容", "内容空白", "建议选题与下一步"),
+            "cross-platform": ("核心发现", "赛道与趋势", "建议选题与下一步"),
+            "brand-product": ("高表现内容", "评论需求", "建议选题与下一步"),
+            "idea-generation": ("高表现内容", "建议选题与下一步"),
+            "market-map": ("赛道与趋势", "对标账号", "机会排序", "建议选题与下一步"),
+        }.get(mode, ())
+        missing_sections = [title for title in required_sections if not _meaningful_section(report_text, title)]
+        add("required_mature_mode_report", not missing_sections, "模式核心问题均已回答" if not missing_sections else f"缺少成熟分析章节：{', '.join(missing_sections)}")
 
-    essential = {"research_brief", "manifest", "raw_evidence", "normalized_data", "report", "identity_fields", "duplicate_posts", "zero_view_semantics", "source_links", "visible_metrics", "time_filter"}
+    essential = {"research_brief", "manifest", "raw_evidence", "normalized_data", "report", "evidence_ledger", "identity_fields", "duplicate_posts", "zero_view_semantics", "source_links", "visible_metrics", "time_filter"}
     essential.update(check.name for check in checks if check.name.startswith("required_"))
     failed_essential = [check for check in checks if check.name in essential and not check.passed]
     status = "failed" if failed_essential else "ready" if all(check.passed for check in checks) else "ready_with_caveats"

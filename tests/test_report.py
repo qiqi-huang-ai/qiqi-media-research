@@ -1,6 +1,6 @@
 import pytest
 
-from scripts.report import Finding, ResearchReport, render_report
+from scripts.report import Finding, ResearchReport, evidence_ledger, render_report
 
 
 def test_finding_without_evidence_is_rejected():
@@ -20,7 +20,8 @@ def test_report_contains_coverage_and_limitations():
     text = render_report(report)
     assert "数据覆盖" in text
     assert "局限与置信度" in text
-    assert "comment:c1" in text
+    assert "comment:c1" not in text
+    assert evidence_ledger(report)[0]["evidence_ids"] == ["comment:c1"]
     assert "研究边界：" in text
     assert "下一步验证：" in text
 
@@ -34,3 +35,14 @@ def test_user_pipes_are_escaped():
     text = render_report(report)
     assert "A \\| B" in text
     assert "左 \\| 右" in text
+
+
+def test_reader_report_hides_internal_evidence_syntax():
+    report = ResearchReport(
+        title="测试",
+        summary="摘要",
+        findings=[Finding(text="方向性结论", evidence_ids=["post:1"], evidence_class="interpreted")],
+    )
+    text = render_report(report)
+    assert "evidence:" not in text
+    assert "[interpreted]" not in text

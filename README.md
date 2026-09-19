@@ -2,6 +2,8 @@
 
 一个面向自媒体研究的开源 Skill。它通过 TikHub REST API 采集公开社媒数据，把原始证据、统一数据、确定性计算和 AI 解读分开，最终生成可回查来源的研究报告。
 
+用户可以只输入“分析这个博主 + 主页链接”“研究最近 7 天某个主题”或“帮我找选题”。Skill 会按研究模式自动补全成熟交付合同，建立数据基线、分组对照和行动建议；短提示词不会降级成简单账号简介或搜索摘要。
+
 ## 平台状态
 
 首版只适配抖音和小红书。脱敏样本、字段映射和离线流程已验证；在你的 TikHub 账号上完成少量真实调用前，接口能力仍标记为 `available-unverified`。其他平台暂不支持。
@@ -13,7 +15,7 @@
 - Cursor：保留 `.cursor/rules/qiqi-media-research.mdc`。
 - WorkBuddy：使用 `workbuddy/SKILL.md` 作为入口。
 
-运行环境只需要 Python 3.11+ 标准库。开发测试可执行 `python3 -m pip install -e '.[dev]'`。
+运行环境需要 Python 3.11+；PDF 渲染依赖 ReportLab，安装项目时会自动安装。开发测试可执行 `python3 -m pip install -e '.[dev]'`。
 
 ## 配置 TIKHUB_API_KEY
 
@@ -53,7 +55,9 @@ python3 -m scripts.research_runner \
   --require time-window --require post-metadata --require visible-metrics
 ```
 
-`--require` 是交付合同，可重复使用。当前支持：`time-window`、`post-metadata`、`visible-metrics`、`comment-insights`、`trend-distinction`、`content-ideas`、`text-hook-structure`。单个采集阶段可以暂时显示 `failed` 并继续补证；最终必须运行 `python3 -m scripts.delivery_audit ... --report ...`，该命令在证据缺失时返回失败状态，结果不得作为成熟交付。
+`--require` 是交付合同，可重复使用。通用合同包括：`time-window`、`post-metadata`、`visible-metrics`、`comment-insights`、`trend-distinction`、`content-ideas`、`text-hook-structure`；账号合同包括：`account-profile`、`account-baseline`、`account-patterns`、`top-bottom-comparison`、`actionable-recommendations`。单个采集阶段可以暂时显示 `failed` 并继续补证；最终必须运行 `python3 -m scripts.delivery_audit ... --report ...`，该命令在证据缺失时返回失败状态，结果不得作为成熟交付。
+
+`account-audit` 会默认增加账号资料、表现基线、标题/文案模式、高低表现对照和可执行建议五项合同，并从代表作品评论中提取方向性需求。内部 evidence ID 写入 `analysis/findings.json`，不会出现在给用户阅读的 Markdown 或 PDF 中。
 
 跨平台研究必须提供第二个平台：
 
@@ -79,7 +83,7 @@ python3 -m scripts.research_runner \
 
 ## 输出目录
 
-`research-output/raw/` 保存原始响应，`normalized/` 保存统一 JSONL，`analysis/data-quality.json` 保存字段级质量检查，`analysis/search-filter.json` 保存时间过滤结果，`analysis/delivery-audit.json` 给出最终交付状态，`brief.json` 记录研究边界和计划/实际调用量，`manifest.json` 记录实际调用清单（不含凭证）。搜索类报告会逐条呈现标题、作者、发布时间、链接、播放量和互动指标，并对热门原因、评论痛点、钩子与结构标明事实/推断边界。
+`research-output/raw/` 保存原始响应，`normalized/` 保存统一 JSONL，`analysis/data-quality.json` 保存字段级质量检查，`analysis/findings.json` 保存内部证据台账，`analysis/search-filter.json` 保存时间过滤结果，`analysis/delivery-audit.json` 给出最终交付状态，`brief.json` 记录研究边界和计划/实际调用量，`manifest.json` 记录实际调用清单（不含凭证）。搜索类报告会逐条呈现标题、作者、发布时间、链接、播放量和互动指标，并对热门原因、评论痛点、钩子与结构标明事实/推断边界。
 
 每次研究正文完成后，还会生成一份亮色科技风的可视化 PDF。PDF 规范、命令和验收要求见 [references/visual-pdf.md](references/visual-pdf.md)。
 

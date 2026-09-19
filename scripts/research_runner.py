@@ -8,6 +8,7 @@ from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 import json
 from pathlib import Path
+from statistics import median
 from typing import Any
 import argparse
 
@@ -17,7 +18,7 @@ from scripts.delivery_audit import audit_delivery, write_delivery_audit
 from scripts.normalize import write_normalized
 from scripts.raw_store import RawStore
 from scripts.quality import audit_posts, write_quality
-from scripts.report import Finding, ResearchReport, render_report
+from scripts.report import Finding, ResearchReport, evidence_ledger, render_report
 
 
 MODES = (
@@ -37,7 +38,18 @@ PLATFORMS = {"douyin", "xiaohongshu"}
 REQUIREMENTS = {
     "time-window", "post-metadata", "visible-metrics", "comment-insights",
     "trend-distinction", "content-ideas", "text-hook-structure",
+    "account-profile", "account-baseline", "account-patterns",
+    "top-bottom-comparison", "actionable-recommendations",
+    "mature-mode-report",
 }
+
+ACCOUNT_AUDIT_REQUIREMENTS = (
+    "account-profile",
+    "account-baseline",
+    "account-patterns",
+    "top-bottom-comparison",
+    "actionable-recommendations",
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -76,15 +88,15 @@ class ResearchExecution:
 
 _MODE_OPERATIONS: dict[str, tuple[str, ...]] = {
     "niche-discovery": ("search", "statistics"),
-    "trend-scan": ("trends",),
+    "trend-scan": ("trends", "search", "statistics"),
     "competitor-discovery": ("account_search",),
-    "account-audit": ("account", "account_posts"),
+    "account-audit": ("account", "account_posts", "statistics", "comments"),
     "viral-breakdown": ("post_detail", "statistics", "comments"),
     "comment-mining": ("post_detail", "statistics", "comments"),
-    "content-gap": ("search", "statistics"),
+    "content-gap": ("search", "statistics", "comments"),
     "cross-platform": ("search", "statistics"),
-    "brand-product": ("search", "statistics"),
-    "idea-generation": ("search", "statistics"),
+    "brand-product": ("search", "statistics", "comments"),
+    "idea-generation": ("search", "statistics", "comments"),
     "market-map": ("search", "statistics"),
 }
 
@@ -153,6 +165,16 @@ def _keyword_findings(posts: list[Any], metrics: list[Any]) -> list[Finding]:
             evidence_ids=[f"post:{top.post_id}"], evidence_class="interpreted", section="核心发现",
         ),
     ]
+    values = _positive_values([post.views if post.views is not None else post.likes for post in posts])
+    if values:
+        baseline = median(values)
+        top_numeric = float(top.views if top.views is not None else top.likes or 0)
+        findings.append(Finding(
+            text=f"样本基线以{'播放' if any(post.views is not None for post in posts) else '点赞'}中位数 {_format_count(baseline)} 计算；最高作品约为基线的 {top_numeric / baseline:.1f} 倍。",
+            evidence_ids=[f"post:{post.post_id}" for post in posts],
+            evidence_class="calculated",
+            section="核心发现",
+        ))
     buckets = {"入门教程": ("入门", "新手", "小白", "保姆级"), "工作流自动化": ("工作流", "自动化"), "案例实操": ("案例", "实操", "实测")}
     repeated = []
     for label, terms in buckets.items():
@@ -164,6 +186,35 @@ def _keyword_findings(posts: list[Any], metrics: list[Any]) -> list[Finding]:
             text="样本主题覆盖：" + "；".join(repeated) + "。多个账号重复出现才可作为方向性趋势，单一账号仍按个案处理。",
             evidence_ids=[f"post:{post.post_id}" for post in posts[:5]], evidence_class="calculated", section="赛道与趋势",
         ))
+        findings.extend([
+            Finding(
+                text=f"机会排序：先验证样本中重复出现且表现可计算的方向——{repeated[0].split()[0]}；只有一条作品出现的主题先按探索项处理。",
+                evidence_ids=[f"post:{post.post_id}" for post in posts[:5]],
+                evidence_class="interpreted",
+                section="机会排序",
+            ),
+            Finding(
+                text=f"可执行建议：围绕“{repeated[0].split()[0]}”制作 3 条不同切口内容，以样本中位数为基线复核；若只由单一账号贡献，不升级为平台趋势。",
+                evidence_ids=[f"post:{post.post_id}" for post in posts[:5]],
+                evidence_class="interpreted",
+                section="建议选题与下一步",
+            ),
+        ])
+    else:
+        findings.extend([
+            Finding(
+                text="共同趋势判断：当前样本未形成重复的预设主题，因此只能确认高表现个案，不能升级为多个账号共同趋势。",
+                evidence_ids=[f"post:{post.post_id}" for post in ranked[:3]],
+                evidence_class="calculated",
+                section="赛道与趋势",
+            ),
+            Finding(
+                text="可执行建议：先对高表现与中位表现作品做人工主题归类，再决定选题，不从单条最高作品直接外推。",
+                evidence_ids=[f"post:{post.post_id}" for post in ranked[:3]],
+                evidence_class="interpreted",
+                section="建议选题与下一步",
+            ),
+        ])
     return findings
 
 
@@ -192,6 +243,194 @@ def _window_label(request: ResearchRequest) -> str:
     return "；未设置时间过滤边界"
 
 
+def _effective_requirements(request: ResearchRequest) -> tuple[str, ...]:
+    defaults = ("mature-mode-report", *(ACCOUNT_AUDIT_REQUIREMENTS if request.mode == "account-audit" else ()))
+    return tuple(dict.fromkeys((*defaults, *request.requirements)))
+
+
+def _write_report(root: Path, filename: str, report: ResearchReport) -> Path:
+    """Write the reader-facing report and a separate internal evidence ledger."""
+    report_path = root / "reports" / filename
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+    report_path.write_text(render_report(report), encoding="utf-8")
+    ledger_path = root / "analysis" / "findings.json"
+    ledger_path.parent.mkdir(parents=True, exist_ok=True)
+    ledger_path.write_text(
+        json.dumps(evidence_ledger(report), ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    return report_path
+
+
+def _positive_values(values: list[int | float | None]) -> list[float]:
+    return [float(value) for value in values if value is not None and value > 0]
+
+
+def _format_count(value: float | int | None) -> str:
+    if value is None:
+        return "未返回"
+    return f"{int(round(value)):,}"
+
+
+def _title_signals(text: str | None) -> set[str]:
+    content = (text or "").casefold()
+    groups = {
+        "教程/方法": ("如何", "怎么", "教程", "手把手", "步骤", "指南"),
+        "工具/产品": ("工具", "上线", "发布", "更新", "测评", "实测"),
+        "Prompt/工作流": ("prompt", "提示词", "工作流", "自动化", "agent"),
+        "冲突/风险": ("完蛋", "淘汰", "失业", "灭绝", "危机", "骗局", "封号", "黑暗"),
+        "清单/数字": ("1个", "2个", "3个", "5个", "10个", "一文看懂", "清单"),
+        "观点/解释": ("为什么", "意味着", "聊聊", "看懂", "真相", "本质"),
+    }
+    return {label for label, words in groups.items() if any(word in content for word in words)}
+
+
+def _account_findings(account: Any, posts: list[Any], metrics: list[Any], comments: list[Any]) -> list[Finding]:
+    account_evidence = [f"account:{account.account_id}"]
+    post_evidence = [f"post:{post.post_id}" for post in posts]
+    findings = [Finding(
+        text=(
+            f"账号事实：{account.name or '未返回昵称'}；简介“{account.bio or '未返回'}”；"
+            f"粉丝 {_format_count(account.followers)}，作品 {_format_count(account.posts)}，"
+            f"累计获赞 {_format_count(account.likes_received)}，关注 {_format_count(account.following)}。"
+            "这些字段只用于描述公开账号规模，不据此推断流量来源或行业地位。"
+        ),
+        evidence_ids=account_evidence,
+        evidence_class="observed",
+        section="对标账号",
+    )]
+    if not posts:
+        return findings
+
+    ranked = [post for post in posts if (post.views or post.likes or 0) > 0]
+    ranked.sort(key=lambda post: (post.views if post.views is not None else post.likes or 0), reverse=True)
+    view_values = _positive_values([post.views for post in posts])
+    like_values = _positive_values([post.likes for post in posts])
+    engagement_values = [
+        metric.engagement_rate for metric in metrics if metric.engagement_rate is not None
+    ]
+    basis = "播放" if view_values else "点赞"
+    basis_values = view_values or like_values
+    baseline = median(basis_values) if basis_values else None
+    findings.append(Finding(
+        text=(
+            f"表现基线：样本 {len(posts)} 条，{basis}中位数 {_format_count(baseline)}；"
+            f"点赞中位数 {_format_count(median(like_values) if like_values else None)}；"
+            f"互动率中位数 {median(engagement_values):.2%}。" if engagement_values else
+            f"表现基线：样本 {len(posts)} 条，{basis}中位数 {_format_count(baseline)}；"
+            f"点赞中位数 {_format_count(median(like_values) if like_values else None)}；互动率因缺少有效播放量未计算。"
+        ),
+        evidence_ids=post_evidence,
+        evidence_class="calculated",
+        section="核心发现",
+    ))
+
+    if ranked:
+        group_size = max(1, len(ranked) // 4)
+        top_group = ranked[:group_size]
+        bottom_group = ranked[-group_size:]
+        top_values = [float(post.views if post.views is not None else post.likes or 0) for post in top_group]
+        bottom_values = [float(post.views if post.views is not None else post.likes or 0) for post in bottom_group]
+        ratio = median(top_values) / median(bottom_values) if median(bottom_values) > 0 else None
+        findings.append(Finding(
+            text=(
+                f"分组对照：按{basis}把有效样本分为前 25% 与后 25%。前组中位数 {_format_count(median(top_values))}，"
+                f"后组中位数 {_format_count(median(bottom_values))}，差距 {ratio:.1f} 倍。" if ratio is not None else
+                f"分组对照：已形成前 25% 与后 25% 样本，但后组缺少可用{basis}，未计算倍数。"
+            ) + f"前组代表《{_headline(top_group[0].text)}》；后组代表《{_headline(bottom_group[-1].text)}》。",
+            evidence_ids=[f"post:{post.post_id}" for post in top_group + bottom_group],
+            evidence_class="calculated",
+            section="高表现内容",
+        ))
+
+    signal_rows = []
+    for label in ("教程/方法", "工具/产品", "Prompt/工作流", "冲突/风险", "清单/数字", "观点/解释"):
+        tagged = [post for post in posts if label in _title_signals(post.text)]
+        values = _positive_values([post.views if post.views is not None else post.likes for post in tagged])
+        if tagged:
+            signal_rows.append((label, len(tagged), median(values) if values else None, tagged))
+    if signal_rows:
+        summary = "；".join(
+            f"{label} {count} 条（{basis}中位数 {_format_count(value)}）"
+            for label, count, value, _ in signal_rows
+        )
+        findings.append(Finding(
+            text=f"标题/文案模式：{summary}。这是多标签文本分类，只说明公开标题/文案与表现的关联，不等同于视频内部结构。",
+            evidence_ids=post_evidence,
+            evidence_class="calculated",
+            section="高表现内容",
+        ))
+        stable = [row for row in signal_rows if row[1] >= 2 and row[2] is not None]
+        if stable:
+            strongest = max(stable, key=lambda row: row[2] or 0)
+            findings.append(Finding(
+                text=(
+                    f"可执行建议：先围绕“{strongest[0]}”做 3 条同主题不同切口的原创测试，并以账号{basis}中位数"
+                    f" {_format_count(baseline)} 作为第一轮基线；不要只复制单条最高作品，也不要把标题信号写成已观察的视频钩子。"
+                ),
+                evidence_ids=[f"post:{post.post_id}" for post in strongest[3]],
+                evidence_class="interpreted",
+                section="建议选题与下一步",
+            ))
+        else:
+            findings.append(Finding(
+                text="可执行建议：当前标题模式每类不足 2 条，先按高表现组代表选题做 3 条原创测试，再用同一表现基线判断是否形成稳定打法。",
+                evidence_ids=[f"post:{post.post_id}" for post in ranked[:3]] or post_evidence,
+                evidence_class="interpreted",
+                section="建议选题与下一步",
+            ))
+    else:
+        findings.extend([
+            Finding(
+                text="标题/文案模式：当前公开文案未命中预设模式词，不能据此编造内容结构；应保留作品明细并进行人工语义归类。",
+                evidence_ids=post_evidence,
+                evidence_class="observed",
+                section="高表现内容",
+            ),
+            Finding(
+                text="可执行建议：先从高表现组与低表现组各选 3 条进行人工主题归类，再确定可重复方向，暂不把单条高表现写成稳定公式。",
+                evidence_ids=[f"post:{post.post_id}" for post in ranked[:3]] or post_evidence,
+                evidence_class="interpreted",
+                section="建议选题与下一步",
+            ),
+        ])
+
+    dates = []
+    for post in posts:
+        try:
+            if post.published_at:
+                dates.append(datetime.fromisoformat(post.published_at.replace("Z", "+00:00")))
+        except ValueError:
+            continue
+    if len(dates) >= 2:
+        dates.sort()
+        span_days = max((dates[-1] - dates[0]).total_seconds() / 86400, 1)
+        weekly = (len(dates) - 1) / span_days * 7
+        findings.append(Finding(
+            text=f"更新节奏：样本发布时间跨度 {dates[0].date()} 至 {dates[-1].date()}，折算约 {weekly:.1f} 条/周；该值只代表当前样本窗口。",
+            evidence_ids=post_evidence,
+            evidence_class="calculated",
+            section="核心发现",
+        ))
+
+    if comments:
+        signals = count_comment_signals(comments, {
+            "使用与配置": ("怎么用", "教程", "安装", "配置", "设置"),
+            "价格与权限": ("多少钱", "收费", "免费", "会员", "权限"),
+            "故障与效果": ("不会", "报错", "失败", "太慢", "没有", "不行"),
+            "资料与模板": ("资料", "模板", "文档", "链接", "代码"),
+        })
+        covered_posts = len({comment.post_id for comment in comments})
+        counts = "；".join(f"{label} {count} 条" for label, count in signals.items())
+        findings.append(Finding(
+            text=f"评论需求：抽取 {covered_posts} 条代表作品的 {len(comments)} 条公开评论；{counts}。这是需求信号，不代表全部受众比例。",
+            evidence_ids=[f"comment:{comment.comment_id}" for comment in comments[:10]],
+            evidence_class="calculated",
+            section="评论需求",
+        ))
+    return findings
+
+
 def plan_request(request: ResearchRequest) -> ResearchPlan:
     if request.mode not in MODES:
         raise ValueError(f"unsupported research mode: {request.mode}")
@@ -208,7 +447,7 @@ def plan_request(request: ResearchRequest) -> ResearchPlan:
         raise ValueError("sample_pages must be between 1 and 3")
     if request.comment_pages < 0 or request.comment_pages > 1:
         raise ValueError("comment_pages must be between 0 and 1")
-    unknown_requirements = set(request.requirements) - REQUIREMENTS
+    unknown_requirements = set(_effective_requirements(request)) - REQUIREMENTS
     if unknown_requirements:
         raise ValueError(f"unsupported delivery requirements: {sorted(unknown_requirements)}")
     _parse_bound(request.start_at, "start_at")
@@ -221,17 +460,23 @@ def plan_request(request: ResearchRequest) -> ResearchPlan:
         raise ValueError("time bounds are currently supported only for search-based modes")
     if (request.start_at or request.end_at) and (request.platform != "douyin" or request.secondary_platform is not None):
         raise ValueError("strict time filtering is currently verified only for Douyin search")
+    account_post_pages = request.sample_pages if "account_posts" in operations else 0
+    # One account page normally contains at most 20 works. Douyin statistics
+    # accepts two IDs per call, so a mature one-page audit budgets ten calls.
+    account_statistics = 10 * account_post_pages if request.mode == "account-audit" and request.platform == "douyin" else 0
+    account_comment_samples = 3 if request.mode == "account-audit" else 0
+    keyword_comment_samples = 3 if request.mode in {"content-gap", "brand-product", "idea-generation"} else 0
     plan = CollectionPlan(
         search_pages=request.sample_pages * 2 if request.mode == "cross-platform" else (request.sample_pages if "search" in operations else 0),
         accounts=1 if any(item in operations for item in ("account", "account_search")) else 0,
-        posts_per_account_pages=1 if "account_posts" in operations else 0,
+        posts_per_account_pages=account_post_pages,
         post_details=1 if "post_detail" in operations else 0,
-        comment_pages=request.comment_pages if "comments" in operations else 0,
+        comment_pages=account_comment_samples or keyword_comment_samples or (request.comment_pages if "comments" in operations else 0),
         trend_pages=1 if "trends" in operations else 0,
         # The statistics endpoint accepts at most two IDs. Hydrate the first
         # six search results (three calls) so visible ranking claims use real
         # play counts without turning a default run into an unbounded crawl.
-        statistics=(1 if "post_detail" in operations else 3) if "statistics" in operations and request.platform == "douyin" else 0,
+        statistics=(account_statistics or (1 if "post_detail" in operations else 3)) if "statistics" in operations and request.platform == "douyin" else 0,
     )
     # A comment operation defaults to one low-cost page when explicitly requested.
     if "comments" in operations and plan.comment_pages == 0:
@@ -309,7 +554,7 @@ def execute_request(request: ResearchRequest, *, adapter: Any, output_root: str 
         "end_at": request.end_at,
         "planned_requests": result.plan.request_count,
         "actual_requests": len(result.raw_paths),
-        "requirements": list(request.requirements),
+        "requirements": list(_effective_requirements(request)),
     }, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     audit_path = write_delivery_audit(output_root, audit_delivery(output_root, result.report_path))
     return replace(result, manifest_path=manifest, brief_path=brief, audit_path=audit_path)
@@ -337,9 +582,7 @@ def _execute_keyword_mode(request: ResearchRequest, plan: ResearchPlan, adapter:
         limitations=["本次结论聚焦关键词搜索样本，用于近期方向筛选；不外推为平台全量趋势或账号长期表现。"],
         confidence="low" if len(posts) < 10 else "medium",
     )
-    report_path = root / "reports" / f"{request.mode}-{request.platform}.md"
-    report_path.parent.mkdir(parents=True, exist_ok=True)
-    report_path.write_text(render_report(report), encoding="utf-8")
+    report_path = _write_report(root, f"{request.mode}-{request.platform}.md", report)
     return ResearchExecution(plan, tuple(raw_paths), normalized, report_path)
 
 
@@ -379,19 +622,29 @@ def _execute_post_mode(request: ResearchRequest, plan: ResearchPlan, adapter: An
     if comments:
         evidence.append(f"comment:{comments[0].comment_id}")
     finding_text = f"作品 {post.post_id} 的互动率为 {metrics.engagement_rate:.4f}。" if metrics.engagement_rate is not None else f"作品 {post.post_id} 缺少足够播放数据，未计算互动率。"
+    hook, structure = _hook_and_structure(post.text)
+    findings = [
+        Finding(text=finding_text, evidence_ids=evidence, evidence_class="calculated"),
+        Finding(
+            text=f"文本层拆解：公开标题/文案呈现“{hook}”；候选结构为“{structure}”。这不是视频画面或逐字稿结论。",
+            evidence_ids=[f"post:{post.post_id}"], evidence_class="interpreted", section="高表现内容",
+        ),
+        Finding(
+            text="可执行建议：先复用作品的选题问题与结果承诺，不复制原句；发布后用同口径互动率和评论问题验证是否适合继续扩展。",
+            evidence_ids=evidence, evidence_class="interpreted", section="建议选题与下一步",
+        ),
+    ] + _comment_findings(comments, post.post_id)
     report = ResearchReport(
         title=f"{request.platform} {request.mode}",
         summary="完成一条作品的详情与评论低成本研究。",
         task=f"研究模式：{request.mode}；作品：{request.entity_id}",
         coverage=f"1 条作品、{len(comments)} 条评论。",
         post_details=_post_detail_lines([post], [metrics]),
-        findings=[Finding(text=finding_text, evidence_ids=evidence, evidence_class="calculated")] + _comment_findings(comments, post.post_id),
+        findings=findings,
         limitations=["本次结论聚焦单条公开作品，用于内容拆解；不外推为该账号整体表现或同类作品的普遍规律。"],
         confidence="low",
     )
-    report_path = root / "reports" / f"{request.mode}-{request.platform}.md"
-    report_path.parent.mkdir(parents=True, exist_ok=True)
-    report_path.write_text(render_report(report), encoding="utf-8")
+    report_path = _write_report(root, f"{request.mode}-{request.platform}.md", report)
     return ResearchExecution(plan, tuple(raw_paths), normalized, report_path)
 
 
@@ -400,37 +653,74 @@ def _execute_account_mode(request: ResearchRequest, plan: ResearchPlan, adapter:
     store = RawStore(root)
     if request.platform == "douyin":
         account = adapter.get_account(request.entity_id)
-        posts_page = adapter.get_account_posts(request.entity_id, cursor="0")
+        cursor: str | None = "0"
     else:
         account = adapter.get_account(user_id=request.entity_id)
-        posts_page = adapter.get_account_posts(user_id=request.entity_id, cursor="")
+        cursor = ""
     account_raw = store.save(request.platform, "account", _adapter_last_raw(adapter, "account"))
-    posts_raw = store.save(request.platform, "account-posts", posts_page.raw)
-    posts = list(posts_page.items)
+    account.raw_path = str(account_raw)
+    write_normalized(root, "accounts", [account])
+    posts: list[Any] = []
+    raw_paths = [account_raw]
+    for _ in range(request.sample_pages):
+        if request.platform == "douyin":
+            page = adapter.get_account_posts(request.entity_id, cursor=cursor or "0")
+        else:
+            page = adapter.get_account_posts(user_id=request.entity_id, cursor=cursor or "")
+        posts_raw = store.save(request.platform, "account-posts", page.raw)
+        raw_paths.append(posts_raw)
+        for post in page.items:
+            post.raw_path = str(posts_raw)
+            posts.append(post)
+        if not page.has_more or page.next_cursor is None:
+            break
+        cursor = page.next_cursor
+
+    raw_paths += _hydrate_statistics(posts, adapter, store, request.platform, limit=len(posts))
     write_quality(root, audit_posts(posts))
-    for post in posts:
-        post.raw_path = str(posts_raw)
     normalized = write_normalized(root, "posts", posts)
     metrics = compute_post_metrics(posts)
     quality = audit_posts(posts)
-    report = ResearchReport(
-        title=f"{request.platform} account-audit",
-        summary=f"完成账号 {account.account_id} 的低成本公开资料审计。",
-        task=f"研究模式：account-audit；账号：{request.entity_id}",
-        coverage=f"1 个账号、{len(posts)} 条作品。",
-        post_details=_post_detail_lines(posts, metrics),
-        findings=[Finding(
-            text=f"样本中 {sum(item.relative_performance is not None for item in metrics)} 条作品具备账号内相对表现数据。",
-            evidence_ids=[f"account:{account.account_id}"] + [f"post:{post.post_id}" for post in posts[:3]],
-            evidence_class="calculated",
-        )],
-        limitations=["本次使用账号资料和一页公开作品样本，用于识别内容结构；不外推为账号全量或长期表现。"],
-        confidence="low" if len(posts) < 10 else "medium",
+    ranked = sorted(
+        [post for post in posts if (post.views or post.likes or 0) > 0],
+        key=lambda post: (post.views if post.views is not None else post.likes or 0),
+        reverse=True,
     )
-    report_path = root / "reports" / f"account-audit-{request.platform}.md"
-    report_path.parent.mkdir(parents=True, exist_ok=True)
-    report_path.write_text(render_report(report), encoding="utf-8")
-    return ResearchExecution(plan, (account_raw, posts_raw), normalized, report_path)
+    representatives: list[Any] = []
+    for candidate in ([*ranked[:2], ranked[len(ranked) // 2]] if ranked else []):
+        if all(candidate.post_id != existing.post_id for existing in representatives):
+            representatives.append(candidate)
+    comments: list[Any] = []
+    for post in representatives[:3]:
+        if request.platform == "douyin":
+            comments_page = adapter.get_comments(post.post_id)
+        else:
+            comments_page = adapter.get_comments(note_id=post.post_id)
+        comments.extend(comments_page.items)
+        raw_paths.append(store.save(request.platform, "comments", comments_page.raw))
+    if comments:
+        write_normalized(root, "comments", comments)
+    report = ResearchReport(
+        title=f"{account.name or request.entity_id}｜{request.platform} 对标账号审计",
+        summary=f"已从账号事实、表现基线、作品分组、标题/文案模式、评论需求和可执行借鉴六个层面完成审计。",
+        task=f"分析公开账号 {account.source_url}；默认目标是判断账号如何做内容、什么表现稳定、哪些打法可借鉴。",
+        coverage=(
+            f"1 个账号、{len(posts)} 条近期作品、{len(comments)} 条公开评论；"
+            f"身份字段完整 {quality.complete_identity}/{quality.total}，指标缺失率 {quality.missing_metric_ratio:.1%}。"
+        ),
+        post_details=_post_detail_lines(posts, metrics),
+        findings=_account_findings(account, posts, metrics, comments),
+        limitations=[
+            f"本次使用最近 {request.sample_pages} 页公开作品样本，不代表账号全部历史作品。",
+            "标题/文案模式是文本层分类；未读取视频画面、逐字稿和完播率，因此不声称观察到真实前三秒钩子或完整视频结构。",
+            "评论来自最多 3 条代表作品，用于发现问题方向，不作为全部受众占比。",
+        ],
+        confidence="low" if len(posts) < 10 else "medium",
+        confidence_note="公开账号事实和样本内统计可复算；策略结论仅在当前样本范围内成立。",
+        validation_steps=["后续复核时保持同一口径增加作品页数，并比较模式的持续性，而不是只追踪单条最高播放作品。"],
+    )
+    report_path = _write_report(root, f"account-audit-{request.platform}.md", report)
+    return ResearchExecution(plan, tuple(raw_paths), normalized, report_path)
 
 
 def _execute_cross_platform(request: ResearchRequest, plan: ResearchPlan, adapter: Any, secondary_adapter: Any, output_root: str | Path) -> ResearchExecution:
@@ -446,19 +736,26 @@ def _execute_cross_platform(request: ResearchRequest, plan: ResearchPlan, adapte
     normalized = write_normalized(root, "posts", posts)
     metrics = compute_post_metrics(posts)
     evidence = [f"post:{post.post_id}" for post in posts[:4]]
+    platform_rows = []
+    for platform, platform_posts in ((request.platform, first_posts), (request.secondary_platform, second_posts)):
+        values = _positive_values([post.views if post.views is not None else post.likes for post in platform_posts])
+        platform_rows.append(f"{platform} {len(platform_posts)} 条，平台内主指标中位数 {_format_count(median(values) if values else None)}")
+    findings = [
+        Finding(text="平台内基线：" + "；".join(platform_rows) + "。指标仅在各平台内部解释，不直接横向比较原始数值。", evidence_ids=evidence, evidence_class="calculated", section="核心发现"),
+        Finding(text="跨平台趋势判断：只有在两个平台均出现的主题才能写成共同方向；当前先保留各平台作品明细和平台内高表现样本，避免把单平台个案外推。", evidence_ids=evidence, evidence_class="interpreted", section="赛道与趋势"),
+        Finding(text="可执行建议：同一选题先分别适配两平台表达，再以各自平台中位数衡量；不要用抖音播放量直接和小红书点赞/收藏量比较。", evidence_ids=evidence, evidence_class="interpreted", section="建议选题与下一步"),
+    ]
     report = ResearchReport(
         title="cross-platform research",
         summary=f"完成“{request.query}”在两个平台的一页样本对照。",
         task=f"研究模式：cross-platform；平台：{request.platform}、{request.secondary_platform}",
         coverage=f"{request.platform} {len(first_posts)} 条；{request.secondary_platform} {len(second_posts)} 条。",
         post_details=_post_detail_lines(posts, metrics),
-        findings=[Finding(text=f"两个平台共获得 {len(metrics)} 条可分析作品，指标仍按平台分别计算。", evidence_ids=evidence, evidence_class="calculated")],
+        findings=findings,
         limitations=["本次比较同一关键词的一页平台内样本；只观察结构和平台内相对表现，不直接比较平台原始热度分。"],
         confidence="low",
     )
-    report_path = root / "reports" / "cross-platform.md"
-    report_path.parent.mkdir(parents=True, exist_ok=True)
-    report_path.write_text(render_report(report), encoding="utf-8")
+    report_path = _write_report(root, "cross-platform.md", report)
     return ResearchExecution(plan, tuple(first_raw_paths + second_raw_paths), normalized, report_path)
 
 
@@ -468,20 +765,29 @@ def _execute_trend_mode(request: ResearchRequest, plan: ResearchPlan, adapter: A
     trends_page = adapter.get_trends()
     raw_path = store.save(request.platform, "trends", trends_page.raw)
     trend_path = write_normalized(root, "trends", trends_page.items)
-    evidence = [f"trend:{item.trend_id}" for item in trends_page.items[:5]]
+    posts, search_raw_paths = _search_posts(request, adapter, store)
+    search_raw_paths += _hydrate_statistics(posts, adapter, store, request.platform)
+    write_normalized(root, "posts", posts)
+    write_quality(root, audit_posts(posts))
+    metrics = compute_post_metrics(posts)
+    matching = [item for item in trends_page.items if request.query.casefold() in item.title.casefold()]
+    trend_evidence = [f"trend:{item.trend_id}" for item in (matching or trends_page.items[:5])]
+    trend_text = (
+        "热榜中直接命中：" + "；".join(f"#{item.rank or '—'} {item.title}" for item in matching[:5])
+        if matching else f"当前热榜未直接命中“{request.query}”；趋势判断主要依据关键词作品的重复出现和表现，不能把热榜快照当作持续趋势。"
+    )
     report = ResearchReport(
         title=f"{request.platform} trend-scan",
-        summary=f"完成“{request.query}”的低成本趋势扫描。",
+        summary=f"完成“{request.query}”的热榜快照、关键词作品和样本表现三层趋势扫描。",
         task=f"研究模式：trend-scan；主题：{request.query}",
-        coverage=f"{len(trends_page.items)} 条趋势项。",
-        findings=[Finding(text=f"当前样本包含 {len(trends_page.items)} 条平台趋势项，需结合关键词搜索判断持续性。", evidence_ids=evidence or [f"raw:{raw_path.name}"], evidence_class="observed")],
+        coverage=f"{len(trends_page.items)} 条趋势项、{len(posts)} 条关键词作品{_window_label(request)}。",
+        post_details=_post_detail_lines(posts, metrics),
+        findings=[Finding(text=trend_text, evidence_ids=trend_evidence or [f"raw:{raw_path.name}"], evidence_class="observed", section="赛道与趋势")] + _keyword_findings(posts, metrics),
         limitations=["趋势数据是当前时点的公开快照，用于发现观察方向；持续性需要结合后续时间窗口复核。"],
-        confidence="low",
+        confidence="low" if len(posts) < 10 else "medium",
     )
-    report_path = root / "reports" / "trend-scan.md"
-    report_path.parent.mkdir(parents=True, exist_ok=True)
-    report_path.write_text(render_report(report), encoding="utf-8")
-    return ResearchExecution(plan, (raw_path,), trend_path, report_path)
+    report_path = _write_report(root, "trend-scan.md", report)
+    return ResearchExecution(plan, tuple([raw_path, *search_raw_paths]), trend_path, report_path)
 
 
 def _execute_competitor_mode(request: ResearchRequest, plan: ResearchPlan, adapter: Any, output_root: str | Path) -> ResearchExecution:
@@ -491,18 +797,31 @@ def _execute_competitor_mode(request: ResearchRequest, plan: ResearchPlan, adapt
     raw_path = store.save(request.platform, "account-search", page.raw)
     normalized = write_normalized(root, "accounts", page.items)
     evidence = [f"account:{account.account_id}" for account in page.items[:5]]
+    account_findings = [
+        Finding(
+            text=(
+                f"候选 {index}：{account.name or '未返回昵称'}；粉丝 {_format_count(account.followers)}，"
+                f"作品 {_format_count(account.posts)}，累计获赞 {_format_count(account.likes_received)}；主页 {account.source_url}。"
+            ),
+            evidence_ids=[f"account:{account.account_id}"], evidence_class="observed", section="对标账号",
+        )
+        for index, account in enumerate(page.items[:10], 1)
+    ]
+    if page.items:
+        account_findings.append(Finding(
+            text="可执行建议：先从候选中选择内容定位最接近的 3 个账号进入 account-audit，比较近期作品中位数和高低表现结构；粉丝数只用于规模分层，不直接等同于对标价值。",
+            evidence_ids=evidence, evidence_class="interpreted", section="建议选题与下一步",
+        ))
     report = ResearchReport(
         title=f"{request.platform} competitor-discovery",
         summary=f"完成“{request.query}”的候选对标账号发现。",
         task=f"研究模式：competitor-discovery；关键词：{request.query}",
         coverage=f"{len(page.items)} 个候选账号。",
-        findings=[Finding(text=f"发现 {len(page.items)} 个候选账号，需结合账号作品样本进一步筛选。", evidence_ids=evidence or [f"raw:{raw_path.name}"], evidence_class="observed")],
+        findings=account_findings or [Finding(text="当前搜索未返回可验证候选账号。", evidence_ids=[f"raw:{raw_path.name}"], evidence_class="observed", section="对标账号")],
         limitations=["候选账号用于建立观察名单；是否适合长期对标，需要结合账号作品样本和内容目标继续判断。"],
         confidence="low",
     )
-    report_path = root / "reports" / "competitor-discovery.md"
-    report_path.parent.mkdir(parents=True, exist_ok=True)
-    report_path.write_text(render_report(report), encoding="utf-8")
+    report_path = _write_report(root, "competitor-discovery.md", report)
     return ResearchExecution(plan, (raw_path,), normalized, report_path)
 
 
@@ -511,6 +830,17 @@ def _execute_specialized_keyword_mode(request: ResearchRequest, plan: ResearchPl
     store = RawStore(root)
     posts, raw_paths = _search_posts(request, adapter, store)
     raw_paths += _hydrate_statistics(posts, adapter, store, request.platform)
+    ranked = sorted(posts, key=lambda post: (post.views or 0, post.likes or 0), reverse=True)
+    comments: list[Any] = []
+    for post in ranked[:3] if "comments" in plan.operations else []:
+        if request.platform == "douyin":
+            page = adapter.get_comments(post.post_id)
+        else:
+            page = adapter.get_comments(note_id=post.post_id)
+        comments.extend(page.items)
+        raw_paths.append(store.save(request.platform, "comments", page.raw))
+    if comments:
+        write_normalized(root, "comments", comments)
     write_quality(root, audit_posts(posts))
     normalized = write_normalized(root, "posts", posts)
     metrics = compute_post_metrics(posts)
@@ -523,19 +853,33 @@ def _execute_specialized_keyword_mode(request: ResearchRequest, plan: ResearchPl
         "market-map": ("市场结构", "账号与主题结构"),
     }
     section, analysis = labels[request.mode]
+    mode_findings: list[Finding] = []
+    if request.mode == "content-gap":
+        mode_findings.append(Finding(
+            text=f"内容空白判断：当前从 {len(posts)} 条供给作品和 {len(comments)} 条代表评论交叉观察；只有评论中重复出现、但高表现作品未充分回答的问题才列为空白，当前结果仍限于样本。",
+            evidence_ids=evidence + [f"comment:{comment.comment_id}" for comment in comments[:10]], evidence_class="interpreted", section="内容空白",
+        ))
+    elif request.mode == "brand-product":
+        mode_findings.extend(_comment_findings(comments, ranked[0].post_id if ranked else "unknown"))
+    elif request.mode == "idea-generation" and comments:
+        mode_findings.extend(_comment_findings(comments, ranked[0].post_id if ranked else "unknown"))
+    elif request.mode == "market-map":
+        author_count = len({post.author_id for post in posts if post.author_id})
+        mode_findings.append(Finding(
+            text=f"市场参与者：当前样本覆盖 {author_count} 个可识别账号；这里只作为关键词市场的观察名单，不等同于完整玩家地图。",
+            evidence_ids=evidence, evidence_class="calculated", section="对标账号",
+        ))
     report = ResearchReport(
         title=f"{request.platform} {request.mode}",
         summary=f"完成“{request.query}”的{section}分析。",
         task=f"研究模式：{request.mode}；关键词：{request.query}",
         coverage=f"{len(posts)} 条搜索作品，{sum(metric.engagement_rate is not None for metric in metrics)} 条可计算互动率{_window_label(request)}；身份字段完整 {quality.complete_identity}/{quality.total}，指标缺失率 {quality.missing_metric_ratio:.1%}。",
         post_details=_post_detail_lines(posts, metrics),
-        findings=_keyword_findings(posts, metrics) + [Finding(text=f"本次以 {analysis} 为分析框架，样本需继续扩展后再形成高置信结论。", evidence_ids=evidence, evidence_class="interpreted")],
+        findings=_keyword_findings(posts, metrics) + mode_findings + [Finding(text=f"本次以 {analysis} 为分析框架，样本外信息不写成结论。", evidence_ids=evidence, evidence_class="interpreted")],
         limitations=["本次以一页关键词样本识别方向，不把样本外信息写成结论；建议用后续样本验证供需和选题持续性。"],
         confidence="low",
     )
-    report_path = root / "reports" / f"{request.mode}-{request.platform}.md"
-    report_path.parent.mkdir(parents=True, exist_ok=True)
-    report_path.write_text(render_report(report), encoding="utf-8")
+    report_path = _write_report(root, f"{request.mode}-{request.platform}.md", report)
     return ResearchExecution(plan, tuple(raw_paths), normalized, report_path)
 
 
@@ -596,12 +940,14 @@ def _filter_posts(posts: list[Any], start_at: str | None, end_at: str | None) ->
     return kept
 
 
-def _hydrate_statistics(posts: list[Any], adapter: Any, store: RawStore, platform: str) -> list[Path]:
+def _hydrate_statistics(
+    posts: list[Any], adapter: Any, store: RawStore, platform: str, *, limit: int = 6
+) -> list[Path]:
     """Fill real public view metrics for a bounded search sample."""
     if platform != "douyin" or not posts or not hasattr(adapter, "get_video_statistics"):
         return []
     raw_paths: list[Path] = []
-    for offset in range(0, min(len(posts), 6), 2):
+    for offset in range(0, min(len(posts), limit), 2):
         batch = posts[offset:offset + 2]
         stats = adapter.get_video_statistics([post.post_id for post in batch])
         for post in batch:

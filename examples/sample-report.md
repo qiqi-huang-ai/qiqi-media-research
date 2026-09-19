@@ -10,8 +10,10 @@
 
 ## 核心发现
 
-- 3 条评论询问模板获取方式 `[calculated]`（evidence: comment:demo-1, comment:demo-2, comment:demo-3）
+- 8 条评论中有 3 条询问模板获取方式，分布在 2 条作品下；这是当前样本的需求信号，不代表全部受众比例。
 
 ## 局限与置信度
 
 置信度：low。样本少、时间窗短，市场判断应视为 hypothesis。
+
+> 内部证据类别与 ID 另存于 `analysis/findings.json`，不在用户报告中展示。

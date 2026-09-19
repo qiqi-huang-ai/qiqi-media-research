@@ -66,10 +66,7 @@ def render_report(report: ResearchReport) -> str:
     _validate(report)
     grouped = {section: [] for section in FINDING_SECTIONS}
     for finding in report.findings:
-        evidence = ", ".join(_escape(item) for item in finding.evidence_ids)
-        grouped[finding.section].append(
-            f"- {_escape(finding.text)} `[{finding.evidence_class}]`（evidence: {evidence}）"
-        )
+        grouped[finding.section].append(f"- {_escape(finding.text)}")
 
     blocks = [f"# {_escape(report.title)}"]
     for section in SECTIONS:
@@ -98,6 +95,20 @@ def render_report(report: ResearchReport) -> str:
             content = "\n".join(grouped[section]) or "- 本次研究未形成有充分证据的结论。"
         blocks.append(content)
     return "\n\n".join(blocks) + "\n"
+
+
+def evidence_ledger(report: ResearchReport) -> list[dict[str, Any]]:
+    """Return machine-readable evidence without exposing internal IDs to readers."""
+    _validate(report)
+    return [
+        {
+            "section": finding.section,
+            "text": finding.text,
+            "evidence_class": finding.evidence_class,
+            "evidence_ids": finding.evidence_ids,
+        }
+        for finding in report.findings
+    ]
 
 
 def _from_dict(data: dict[str, Any]) -> ResearchReport:
