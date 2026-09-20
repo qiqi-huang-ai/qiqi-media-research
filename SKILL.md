@@ -28,7 +28,7 @@ description: 使用 TikHub REST API 研究公开社媒数据，完成赛道、�
 7. 每次请求先以 `RawStore` 保存原始响应，再写入 `normalized/*.jsonl` 和不含凭证的 `manifest.json`。
 8. 先运行 `scripts.analyze` 与 `scripts.score` 的确定性计算，再进行语义整理。语义层只能解释标准化数据，不得让语言模型改写原始数值；账号审计不得把脚本的账号画像和 Top 作品当作最终交付。
 9. 用 `scripts.report` 输出内部草稿和证据台账。每条关键发现必须在 `analysis/findings.json` 中保留内部证据类别和 evidence ID；面向用户的 Markdown 和 PDF 只呈现自然语言，不显示机器标签。局限部分使用“结论层级、研究边界、下一步验证”，不要写成缺陷清单。
-10. 研究正文完成后，必须额外生成可视化 PDF；按 [references/visual-pdf.md](references/visual-pdf.md) 渲染、检查后交付。PDF 只呈现已有证据，不得替代 Markdown 或制造结论。
+10. 研究正文完成后，必须额外生成可视化 PDF；按 [references/visual-pdf.md](references/visual-pdf.md) 用同次 `analysis/data-pack.json` 渲染、检查后交付。Markdown 是结论真源，PDF 只做同内容的视觉层级与可复算图表，不得替代 Markdown、制造结论或把不可见指标画成事实。
 11. 搜索类研究必须输出作品级明细：标题、作者、发布时间、原始链接、播放量及可见互动指标。抖音播放量必须先走独立统计端点；详情接口的 `0` 只能表示未取到，不得写成零播放。
 12. 对“热门原因、用户痛点、开头钩子、内容结构”逐项区分数据事实、样本推断和待验证假设。没有逐字稿或视频画面时，只能说“基于标题/文案的初步判断”，不能冒充已完成视频拆解。
 13. 搜索结果必须按 `published_at` 做本地时间过滤；用户给出“最近 N 天”时，先换算成明确的带时区 `start_at/end_at`，并在 `brief.json` 和报告中记录原始样本、过滤后样本及时间边界。

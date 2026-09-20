@@ -23,7 +23,7 @@
 
 ## 单一来源交付
 
-Markdown 是内容真源，PDF 由同一 Markdown 渲染。PDF 可以增加图表和视觉层级，但不得改变数字、样本量、链接、结论强度或证据边界。内部 evidence ID 和证据类别只保留在 `analysis/findings.json`，面向用户的 Markdown 与 PDF 都使用自然语言。
+Markdown 是内容真源，PDF 由同一 Markdown 渲染。PDF 可以增加图表和视觉层级，但不得改变数字、样本量、链接、结论强度或证据边界。图表只能读取同次运行的 `analysis/data-pack.json` 并标注其口径；平台未返回的曝光、点击、完播、转粉、成交等数据必须保持“未采集，不判定”。内部 evidence ID 和证据类别只保留在 `analysis/findings.json`，面向用户的 Markdown 与 PDF 都使用自然语言。
 
 `account-audit` 采用两阶段交付：运行器先写入 `analysis/data-pack.json`、`analysis/evidence-pack.md` 和草稿，代理语义复核后才写入 `reports/account-audit-<platform>.md`。主报告只呈现决策结论和精选证据，完整作品明细放入 evidence pack，不得用草稿替代最终报告。
 
