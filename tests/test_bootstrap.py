@@ -17,3 +17,7 @@ def test_runtime_python_uses_the_platform_venv_layout(tmp_path):
 
     assert python.parent.name in {"bin", "Scripts"}
     assert python.name in {"python", "python.exe"}
+
+
+def test_bootstrap_reads_runtime_dependencies_from_the_project_metadata():
+    assert "reportlab>=4,<5" in bootstrap.project_dependencies()

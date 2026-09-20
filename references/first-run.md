@@ -16,7 +16,7 @@
 用户说“帮我配置这个 Skill”“第一次使用 qiqi-media-research”或贴出安装包/地址时，代理应：
 
 1. 定位 Skill 根目录并确认其中有 `pyproject.toml` 与 `SKILL.md`。
-2. 在根目录执行 `python3 -m scripts.bootstrap --setup`，让脚本创建隔离的 `.venv` 并安装项目依赖。
+2. 在根目录执行 `python3 -m scripts.bootstrap --setup`，让脚本创建隔离的 `.venv` 并安装声明的运行依赖；它不会构建或污染用户下载的 Skill 目录。
 3. 用 `.venv` 中的 Python 运行 `python -m scripts.doctor`；只反馈 `configured` / `missing` 等状态，不回显任何密钥。
 4. 若 `TIKHUB_API_KEY` 缺失，告诉用户去 WorkBuddy/Codex 的安全环境变量或本机环境配置页面填写。不得要求用户把 Key 发送到对话，也不得写入 `.env`、提示词、日志或 GitHub。
 5. 诊断通过后，用一个低成本、小样本研究验证安装；先展示调用计划，未获同意不得扩展到 20 次以上调用。

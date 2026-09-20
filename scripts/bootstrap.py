@@ -12,6 +12,7 @@ import os
 from pathlib import Path
 import subprocess
 import sys
+import tomllib
 import venv
 
 
@@ -20,6 +21,13 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def runtime_python(venv_dir: Path) -> Path:
     return venv_dir / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+
+
+def project_dependencies() -> tuple[str, ...]:
+    """Read declared runtime dependencies without building the local package."""
+    project = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    dependencies = project.get("project", {}).get("dependencies", [])
+    return tuple(str(item) for item in dependencies)
 
 
 def status(venv_dir: Path | None = None) -> dict[str, object]:
@@ -44,7 +52,9 @@ def setup(venv_dir: Path | None = None) -> dict[str, object]:
     if created:
         venv.EnvBuilder(with_pip=True).create(target)
     python = runtime_python(target)
-    subprocess.run([str(python), "-m", "pip", "install", "."], cwd=ROOT, check=True)
+    dependencies = project_dependencies()
+    if dependencies:
+        subprocess.run([str(python), "-m", "pip", "install", *dependencies], cwd=ROOT, check=True)
     result.update({"runtime": str(python), "dependencies": "installed", "venv_created": created})
     return result
 

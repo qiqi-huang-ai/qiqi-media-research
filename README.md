@@ -15,7 +15,7 @@
 - Cursor：保留 `.cursor/rules/qiqi-media-research.mdc`。
 - WorkBuddy：使用 `workbuddy/SKILL.md` 作为入口。
 
-你可以给用户两种入口：安装包或 GitHub 地址 `https://github.com/qiqi-huang-ai/qiqi-media-research`。安装完成后，让 AI 在 Skill 根目录执行以下命令：它会创建隔离 `.venv` 并安装运行依赖，用户不需要手动敲 pip 命令。
+你可以给用户两种入口：安装包或 GitHub 地址 `https://github.com/qiqi-huang-ai/qiqi-media-research`。安装完成后，让 AI 在 Skill 根目录执行以下命令：它会创建隔离 `.venv` 并安装运行依赖，不会在用户下载的 Skill 目录生成构建产物，用户不需要手动敲 pip 命令。
 
 ```bash
 python3 -m scripts.bootstrap --setup
