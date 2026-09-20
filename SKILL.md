@@ -19,8 +19,8 @@ description: 使用 TikHub REST API 研究公开社媒数据，完成赛道、�
 
 ## 执行流程
 
-1. 用 `templates/research-brief.md` 明确研究问题、平台、时间窗、最小样本和排除项。
-2. 运行 `python3 -m scripts.doctor`。缺少 `TIKHUB_API_KEY` 时停止；不得请求、显示、保存或记录密钥。
+1. 用 `templates/research-brief.md` 明确研究问题、平台、时间窗、最小样本和排除项。首次安装、用户贴出安装包/仓库地址或说“帮我配置”时，先读 [references/first-run.md](references/first-run.md)：代理应自行运行 `python3 -m scripts.bootstrap --setup` 安装隔离依赖，不让用户手动敲依赖命令。
+2. 运行 `python3 -m scripts.doctor`。缺少 `TIKHUB_API_KEY` 时停止；不得请求、显示、保存或记录密钥。只引导用户在客户端安全环境变量中自行配置 Key，不能要求用户把 Key 贴到对话。
 3. 读取 `references/platform-capabilities.md`，只使用当前平台可用的能力。
 4. 用 `scripts.collect.CollectionPlan` 估算调用次数并说明端点族。默认先取 1–3 个样本；超过 20 次调用须先取得用户明确同意。
 5. 遇到 `401/403` 停止并提示检查权限；遇到 `402` 停止并提示额度或计费问题，不自动重试付费失败。`403` 如果是 Cloudflare/WAF 拦截，记录失败类型后结束本次任务，不继续请求、不切换出口、不规避防护。

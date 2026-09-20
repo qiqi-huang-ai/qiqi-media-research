@@ -15,11 +15,17 @@
 - Cursor：保留 `.cursor/rules/qiqi-media-research.mdc`。
 - WorkBuddy：使用 `workbuddy/SKILL.md` 作为入口。
 
-运行环境需要 Python 3.11+；PDF 渲染依赖 ReportLab，安装项目时会自动安装。开发测试可执行 `python3 -m pip install -e '.[dev]'`。
+你可以给用户两种入口：安装包或 GitHub 地址 `https://github.com/qiqi-huang-ai/qiqi-media-research`。安装完成后，让 AI 在 Skill 根目录执行以下命令：它会创建隔离 `.venv` 并安装运行依赖，用户不需要手动敲 pip 命令。
+
+```bash
+python3 -m scripts.bootstrap --setup
+```
+
+运行环境需要 Python 3.11+；PDF 渲染依赖 ReportLab，会随安装自动安装。开发测试才需要执行 `python3 -m pip install -e '.[dev]'`。两种入口、AI 初始化提示词和密钥边界见 [references/first-run.md](references/first-run.md)。
 
 ## 配置 TIKHUB_API_KEY
 
-从 TikHub 获取自己的 Key，只保存在本机环境变量：
+从 TikHub 获取自己的 Key，只保存在 WorkBuddy/Codex 的安全环境变量或本机环境变量。不要把 Key 发给 AI；AI 只能检查它是否已配置：
 
 ```bash
 export TIKHUB_API_KEY="你的本地Key"
