@@ -106,6 +106,13 @@ class TikHubClient:
             except urllib.error.HTTPError as exc:
                 retryable = exc.code == 429 or 500 <= exc.code <= 599
                 if not retryable or attempt == self.max_retries:
+                    if exc.code == 403 and self._is_cloudflare_waf(exc):
+                        raise TikHubError(
+                            "TikHub HTTP 403 (Cloudflare/WAF blocked this request; "
+                            "end this task and start a new task later)",
+                            status=403,
+                            retryable=False,
+                        ) from exc
                     raise TikHubError(
                         f"TikHub HTTP {exc.code}",
                         status=exc.code,
@@ -130,6 +137,16 @@ class TikHubClient:
         if not isinstance(payload, dict):
             raise TikHubError("TikHub returned non-object JSON")
         return payload
+
+    @staticmethod
+    def _is_cloudflare_waf(exc: urllib.error.HTTPError) -> bool:
+        """Recognize a block page without surfacing its raw body to users."""
+        try:
+            body = exc.read(4096).decode("utf-8", errors="replace").lower()
+        except (AttributeError, OSError):
+            body = ""
+        markers = ("cloudflare", "error 1010", "error 1020", "waf")
+        return any(marker in body for marker in markers)
 
     @staticmethod
     def _retry_delay(attempt: int, headers: Mapping[str, object]) -> float:

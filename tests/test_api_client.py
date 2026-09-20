@@ -67,6 +67,17 @@ def test_401_is_not_retried(monkeypatch):
     assert caught.value.retryable is False
 
 
+def test_cloudflare_403_is_not_retried_and_is_explicit(monkeypatch):
+    monkeypatch.setenv("TIKHUB_API_KEY", "secret-value")
+    blocked = http_error(403, b"<html>Cloudflare Error 1010</html>")
+    with patch("urllib.request.urlopen", side_effect=blocked) as mocked:
+        with pytest.raises(TikHubError, match="Cloudflare/WAF") as caught:
+            TikHubClient().get("/x", {})
+    assert mocked.call_count == 1
+    assert caught.value.status == 403
+    assert caught.value.retryable is False
+
+
 def test_500_retries_only_to_configured_limit(monkeypatch):
     monkeypatch.setenv("TIKHUB_API_KEY", "secret-value")
     with patch("urllib.request.urlopen", side_effect=http_error(500)) as mocked:
