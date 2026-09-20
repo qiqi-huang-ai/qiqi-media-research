@@ -282,9 +282,69 @@ def _write_account_data_pack(
     analysis = root / "analysis"
     analysis.mkdir(parents=True, exist_ok=True)
     (analysis / "draft-account-audit.md").write_text(render_report(report), encoding="utf-8")
+    evidence_lines = [
+        "# 账号审计证据包",
+        "",
+        "> 本文件供代理回查完整作品、指标和链接；不要直接作为读者报告交付。",
+        "",
+        f"- 账号：{account.name or '未返回'}",
+        f"- 主页：{account.source_url or '未返回'}",
+        f"- 作品样本：{len(posts)} 条；评论样本：{len(comments)} 条",
+        "",
+        "## 原始作品明细",
+        "",
+        *[f"- {line}" for line in report.post_details],
+        "",
+        "## 评论回查",
+        "",
+    ]
+    if comments:
+        evidence_lines.extend(
+            f"- 评论 {comment.comment_id}（作品 {comment.post_id}，赞 {comment.likes if comment.likes is not None else '未返回'}）：{(comment.text or '').strip()}"
+            for comment in comments
+        )
+    else:
+        evidence_lines.append("- 未采集到可用公开评论。")
+    (analysis / "evidence-pack.md").write_text("\n".join(evidence_lines) + "\n", encoding="utf-8")
     (analysis / "findings.json").write_text(
         json.dumps(evidence_ledger(report), ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
     )
+    ranked = sorted(posts, key=lambda post: float(post.views if post.views is not None else post.likes or 0), reverse=True)
+    ranked_values = [float(post.views if post.views is not None else post.likes or 0) for post in ranked]
+    group_size = max(1, len(ranked) // 4) if ranked else 0
+    decision_metrics = {
+        "baseline": {
+            "views_median": median(_positive_values([post.views for post in posts])) if _positive_values([post.views for post in posts]) else None,
+            "likes_median": median(_positive_values([post.likes for post in posts])) if _positive_values([post.likes for post in posts]) else None,
+        },
+        "performance_bands": {
+            "high": [post.post_id for post in ranked[:group_size]],
+            "middle": [post.post_id for post in ranked[group_size:-group_size]] if group_size else [],
+            "low": [post.post_id for post in ranked[-group_size:]] if group_size else [],
+            "high_median": median(ranked_values[:group_size]) if group_size else None,
+            "low_median": median(ranked_values[-group_size:]) if group_size else None,
+        },
+        "content_pillars": [
+            {
+                "label": label,
+                "count": len(items),
+                "post_ids": [post.post_id for post in items],
+                "views_median": median(_positive_values([post.views for post in items])) if _positive_values([post.views for post in items]) else None,
+            }
+            for label, items in sorted(
+                ((label, [post for post in posts if _primary_content_type(post.text) == label]) for label in {_primary_content_type(post.text) for post in posts}),
+                key=lambda item: (-len(item[1]), item[0]),
+            )
+        ],
+        "sample_roles": {
+            "account_owner_posts": sum(post.author_id in {None, account.account_id} for post in posts),
+            "external_or_collaboration_posts": sum(post.author_id not in {None, account.account_id} for post in posts),
+        },
+        "comment_coverage": {
+            "count": len(comments),
+            "post_count": len({comment.post_id for comment in comments}),
+        },
+    }
     pack = {
         "status": "deterministic-data-pack",
         "mode": "account-audit",
@@ -294,6 +354,19 @@ def _write_account_data_pack(
         "metrics": [asdict(metric) for metric in metrics],
         "comments": [asdict(comment) for comment in comments],
         "findings": evidence_ledger(report),
+        "decision_metrics": decision_metrics,
+        "decision_report_contract": {
+            "modules": [
+                "账号定位与内容角色",
+                "爆款规律与反例",
+                "内容策略地图",
+                "公开受众需求画像",
+                "可借鉴方向",
+                "验证计划",
+            ],
+            "reader_report_excludes_full_raw_details": True,
+            "evidence_pack": "analysis/evidence-pack.md",
+        },
     }
     (analysis / "data-pack.json").write_text(json.dumps(pack, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     template = {
@@ -304,9 +377,9 @@ def _write_account_data_pack(
         "reviewed_sections": {
             "account_positioning": "",
             "recent_vs_historical": "",
-            "high_vs_low_comparison": "",
-            "comment_insights": "",
-            "stable_vs_one_off": "",
+            "content_strategy": "",
+            "viral_patterns": "",
+            "audience_needs": "",
             "copyable_boundaries": "",
             "actions_and_validation": "",
         },

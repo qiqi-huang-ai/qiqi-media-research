@@ -188,7 +188,13 @@ def test_execute_account_audit_requires_entity_id(tmp_path):
     assert not result.report_path.exists()
     assert (tmp_path / "analysis/data-pack.json").is_file()
     assert (tmp_path / "analysis/draft-account-audit.md").is_file()
+    assert (tmp_path / "analysis/evidence-pack.md").is_file()
     assert (tmp_path / "analysis/semantic-review.template.json").is_file()
+    pack = json.loads((tmp_path / "analysis/data-pack.json").read_text())
+    assert pack["decision_report_contract"]["evidence_pack"] == "analysis/evidence-pack.md"
+    assert pack["decision_metrics"]["performance_bands"]["high"]
+    review_template = json.loads((tmp_path / "analysis/semantic-review.template.json").read_text())
+    assert "content_strategy" in review_template["reviewed_sections"]
     audit = json.loads(result.audit_path.read_text())
     assert audit["status"] == "failed"
     assert any(item["name"] == "semantic_review" and not item["passed"] for item in audit["checks"])

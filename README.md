@@ -57,7 +57,7 @@ python3 -m scripts.research_runner \
 
 `--require` 是交付合同，可重复使用。通用合同包括：`time-window`、`post-metadata`、`visible-metrics`、`comment-insights`、`trend-distinction`、`content-ideas`、`text-hook-structure`；账号合同包括：`account-profile`、`account-baseline`、`account-patterns`、`top-bottom-comparison`、`actionable-recommendations`。单个采集阶段可以暂时显示 `failed` 并继续补证；最终必须运行 `python3 -m scripts.delivery_audit ... --report ...`，该命令在证据缺失时返回失败状态，结果不得作为成熟交付。
 
-`account-audit` 会默认增加账号资料、表现基线、标题/文案模式、高低表现对照和可执行建议五项合同，并从代表作品评论中提取方向性需求。内部 evidence ID 写入 `analysis/findings.json`，不会出现在给用户阅读的 Markdown 或 PDF 中。
+`account-audit` 默认交付决策报告：账号定位与内容角色、爆款规律与反例、内容策略地图、公开受众需求画像、可借鉴方向矩阵和验证计划。完整原始作品明细单独写入 `analysis/evidence-pack.md`，主报告和 PDF 只呈现精选证据与行动判断。内部 evidence ID 写入 `analysis/findings.json`，不会出现在给用户阅读的 Markdown 或 PDF 中。
 
 跨平台研究必须提供第二个平台：
 

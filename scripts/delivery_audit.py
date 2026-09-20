@@ -133,8 +133,8 @@ def audit_delivery(root: str | Path, report_path: str | Path) -> DeliveryAudit:
             review = json.loads(review_path.read_text(encoding="utf-8")) if review_path.is_file() else {}
             reviewed_sections = review.get("reviewed_sections") if isinstance(review, dict) else None
             required_review_sections = {
-                "account_positioning", "recent_vs_historical", "high_vs_low_comparison",
-                "comment_insights", "stable_vs_one_off", "copyable_boundaries", "actions_and_validation",
+                "account_positioning", "recent_vs_historical", "content_strategy",
+                "viral_patterns", "audience_needs", "copyable_boundaries", "actions_and_validation",
             }
             review_ok = (
                 review.get("status") == "reviewed"
@@ -142,31 +142,38 @@ def audit_delivery(root: str | Path, report_path: str | Path) -> DeliveryAudit:
                 and review.get("source_data_pack") == "analysis/data-pack.json"
                 and isinstance(reviewed_sections, dict)
                 and required_review_sections <= set(reviewed_sections)
-                and all(str(reviewed_sections.get(key, "")).strip() for key in required_review_sections)
+                and all(len(str(reviewed_sections.get(key, "")).strip()) >= 80 for key in required_review_sections)
             )
-            add("semantic_review", review_ok, "语义复核记录完整" if review_ok else "缺少由代理完成的 semantic-review.json，或复核项未逐项填写")
-            appendix_ok = "## 附录：原始作品明细" in report_text and "## 核心发现" in report_text
-            add("raw_details_appendix", appendix_ok, "原始明细位于附录，正文保留分析结论" if appendix_ok else "原始明细未放入附录或正文缺少核心分析")
-            finding_count = len(ledger)
-            required_markers = {
-                "账号定位：": "账号定位",
-                "样本边界：": "近期/历史样本边界",
-                "近期更新节奏：": "近期更新节奏",
-                "内容组合：": "内容组合",
-                "标题钩子模式：": "标题钩子模式",
-                "稳定规律：": "稳定规律",
-                "偶发爆款：": "偶发爆款",
-                "可复制：": "可复制边界",
-                "当前无法验证：": "待验证边界",
-            }
-            missing_markers = [label for marker, label in required_markers.items() if marker not in report_text]
-            add("account_analysis_density", finding_count >= 18 and not missing_markers,
-                f"账号审计结论 {finding_count} 条；" + ("必要分析项齐全" if not missing_markers else f"缺少：{', '.join(missing_markers)}"))
+            add("semantic_review", review_ok, "语义复核记录完整且每项达到最小分析长度" if review_ok else "缺少由代理完成的 semantic-review.json，或复核项过短/未逐项填写")
+            evidence_pack = root / "analysis" / "evidence-pack.md"
+            add("evidence_pack", evidence_pack.is_file() and evidence_pack.stat().st_size > 200,
+                "完整原始明细已移入独立证据包" if evidence_pack.is_file() else "缺少 analysis/evidence-pack.md")
+            decision_sections = (
+                "账号定位与内容角色",
+                "爆款规律与反例",
+                "内容策略地图",
+                "公开受众需求画像",
+                "可借鉴方向",
+                "验证计划",
+            )
+            missing_sections = [title for title in decision_sections if not _meaningful_section(report_text, title)]
+            section_without_basis = [
+                title for title in decision_sections
+                if _meaningful_section(report_text, title)
+                and not any(term in _section_content(report_text, title) for term in ("依据", "样本", "基线"))
+            ]
+            validation_content = _section_content(report_text, "验证计划")
+            decision_quality = not missing_sections and not section_without_basis and len(validation_content) >= 120 and any(term in validation_content for term in ("指标", "观察", "升级"))
+            add("decision_report_quality", decision_quality,
+                "六个决策模块均有证据依据和行动含义" if decision_quality else
+                f"决策模块缺失：{', '.join(missing_sections + section_without_basis)}；或验证计划不够具体")
+            add("reader_report_separation", "## 附录：原始作品明细" not in report_text and report_text.count("原始链接：") <= 8,
+                "主报告与完整原始明细已分离" if "## 附录：原始作品明细" not in report_text else "完整原始明细仍铺在读者报告正文/附录")
 
     essential = {"research_brief", "manifest", "raw_evidence", "normalized_data", "report", "evidence_ledger", "identity_fields", "duplicate_posts", "zero_view_semantics", "source_links", "visible_metrics", "time_filter"}
     essential.update(check.name for check in checks if check.name.startswith("required_"))
     if mode == "account-audit":
-        essential.update({"account_analysis_density", "semantic_review", "raw_details_appendix"})
+        essential.update({"semantic_review", "evidence_pack", "decision_report_quality", "reader_report_separation"})
     failed_essential = [check for check in checks if check.name in essential and not check.passed]
     status = "failed" if failed_essential else "ready" if all(check.passed for check in checks) else "ready_with_caveats"
     return DeliveryAudit(status, tuple(checks))
@@ -178,6 +185,13 @@ def _meaningful_section(report_text: str, title: str) -> bool:
         return False
     content = report_text.split(marker, 1)[1].split("\n## ", 1)[0]
     return bool(content.strip()) and "未形成有充分证据的结论" not in content
+
+
+def _section_content(report_text: str, title: str) -> str:
+    marker = f"## {title}"
+    if marker not in report_text:
+        return ""
+    return report_text.split(marker, 1)[1].split("\n## ", 1)[0].strip()
 
 
 def write_delivery_audit(root: str | Path, audit: DeliveryAudit) -> Path:

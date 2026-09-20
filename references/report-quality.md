@@ -25,15 +25,15 @@
 
 Markdown 是内容真源，PDF 由同一 Markdown 渲染。PDF 可以增加图表和视觉层级，但不得改变数字、样本量、链接、结论强度或证据边界。内部 evidence ID 和证据类别只保留在 `analysis/findings.json`，面向用户的 Markdown 与 PDF 都使用自然语言。
 
-`account-audit` 采用两阶段交付：运行器先写入 `analysis/data-pack.json` 和草稿，代理语义复核后才写入 `reports/account-audit-<platform>.md`。原始作品明细必须放在“附录：原始作品明细”，不得用草稿替代最终报告。
+`account-audit` 采用两阶段交付：运行器先写入 `analysis/data-pack.json`、`analysis/evidence-pack.md` 和草稿，代理语义复核后才写入 `reports/account-audit-<platform>.md`。主报告只呈现决策结论和精选证据，完整作品明细放入 evidence pack，不得用草稿替代最终报告。
 
 ## 信息密度
 
-- 不用基础画像、排行榜和空章节堆长度。
+- 不用基础画像、排行榜、原始明细和空章节堆长度。
 - 每个排行榜后必须回答“相对什么基线”“与普通/低表现样本差在哪里”“是否重复出现”。
 - 主题分布必须同时给出主题数量和主题表现；多标签计数不能伪装成互斥占比。
 - 建议必须连接到样本、基线和验证方法。换一个账号仍然成立的泛化建议应删除或改写。
-- 账号审计按 `account-audit.md` 验收；无视频证据时只能分析公开标题/文案，不能生成虚假的视频内部拆解。
+- 账号审计按 `account-audit.md` 验收；无视频证据时只能分析公开标题/文案，不能生成虚假的视频内部拆解。账号定位、内容策略、公开受众需求和借鉴方向必须分别回答。
 
 ## 组合研究的最低证据链
 
